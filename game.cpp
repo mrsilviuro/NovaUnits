@@ -2,67 +2,71 @@
 #include <string.h>
 
 // ============================================================
-// MODELUL JOCULUI — definitii + valori initiale
-// (deocamdata fara logica; o adaugam la pasii urmatori)
+// TABELUL + valori initiale (totul in RAM, zero flash)
 // ============================================================
+UnitRow unitTable[MAX_UNITS] = {};
+UnitRow& myRow() { return unitTable[UNIT_ID - 1]; }
 
-// --- Identitate rol unitate ---
-int8_t selectedMode = -1;
+uint32_t liveCapturePoints = 0;
+uint32_t lastPointTick     = 0;
 
-// --- Scoruri ---
-int32_t  liveScore[4]        = {0, 0, 0, 0};
-uint16_t teamKills[4]        = {0, 0, 0, 0};
-int32_t  appliedPenalties[4] = {0, 0, 0, 0};
+int8_t  selectedMode        = -1;
+int32_t appliedPenalties[4] = {0, 0, 0, 0};
 
-// --- Sector ---
-Team     sectorOwner          = TEAM_NEUTRAL;
-uint32_t captureStartTime     = 0;
-uint32_t currentCapturePoints = 0;
+// Setari Bomba
+uint32_t bombTimerMs       = 15 * 60000UL;
+uint32_t cooldownMs        = 20 * 60000UL;
+uint32_t bombPointsExplode = 600;
+uint32_t bombPointsDefuse  = 300;
 
-// --- Bomb ---
-bool     isBombArmed      = false;
-Team     bombOwner        = TEAM_NEUTRAL;
-uint32_t bombPlantTime    = 0;
-uint32_t bombTimerMs      = 15 * 60000UL;  // 15 min
-bool     isCooldownActive = false;
-uint32_t cooldownStartTime= 0;
-uint32_t cooldownMs       = 20 * 60000UL;  // 20 min
-uint32_t bombPointsExplode= 600;
-uint32_t bombPointsDefuse = 300;
-
-// --- Respawn ---
-Team     respawnTeam          = TEAM_NEUTRAL;
-uint32_t respawnTimeMs        = 300000;     // 5 min
+// Setari Respawn + coada
+uint32_t respawnTimeMs        = 300000;
 uint16_t respawnPenaltyPoints = 25;
-uint16_t teamMaxRespawns[4]   = {0, 0, 0, 0};  // 0 = nelimitat
-uint8_t  queueCount           = 0;
-uint8_t  queueHead            = 0;
-uint8_t  queueTail            = 0;
+uint16_t teamMaxRespawns[4]   = {0, 0, 0, 0};
+uint8_t  queueCount = 0, queueHead = 0, queueTail = 0;
 uint32_t respawnQueue[100]    = {0};
 
-// --- Flux joc ---
+// Flux joc
 uint32_t     gameTimeLeftSeconds = 0;
 bool         isGameTimerRunning  = false;
 bool         isTimeOut           = false;
 Team         conquestWinner      = TEAM_NEUTRAL;
 WinCondition currentWinCondition = WIN_BY_POINTS;
 uint32_t     bonusIntervalMinutes= 30;
-uint32_t     actionTimeMs        = 15000;   // 15 sec
+uint32_t     actionTimeMs        = 15000;
 bool         isGamePaused        = false;
 uint32_t     pauseStartTime      = 0;
 
-// --- Date agregate retea (toate offline / zero pana la Faza 2) ---
-uint8_t  globalUnitMode[MAX_UNITS]   = {0};
-Team     globalUnitStatus[MAX_UNITS] = {TEAM_NEUTRAL};
-uint32_t lastSeenTime[MAX_UNITS]     = {0};
-uint32_t globalEventTime[MAX_UNITS]  = {0};
-uint8_t  globalBattery[MAX_UNITS]    = {0};
+// Comunicatii
+uint8_t  globalBattery[MAX_UNITS] = {0};
+uint32_t lastSeenTime[MAX_UNITS]  = {0};
 
 // ============================================================
-// buildContext()
+// Scor prin INSUMARE peste tabel
+// ============================================================
+int32_t teamScore(uint8_t team) {
+    int32_t total = 0;
+    for (uint8_t u = 0; u < MAX_UNITS; u++) total += unitTable[u].savedPoints[team];
+    // + acumularea LIVE a sectorului local detinut acum de aceasta echipa
+    if (myRow().mode == 1 && myRow().status == SEC_CAPTURED &&
+        myRow().team == (Team)(team + 1))
+        total += (int32_t)liveCapturePoints;
+    return total;
+}
+
+uint16_t teamKillTotal(uint8_t team) {
+    uint32_t total = 0;
+    for (uint8_t u = 0; u < MAX_UNITS; u++) total += unitTable[u].kills[team];
+    return (total > 65535) ? 65535 : (uint16_t)total;
+}
+
+// ============================================================
+// buildContext() — totul din tabel
 // ============================================================
 void buildContext(PageContext& ctx, uint8_t currentPage, uint8_t batteryPercent,
                   uint8_t page4Scroll, uint8_t page5Scroll) {
+    UnitRow& r = myRow();
+
     ctx.batteryPercent     = batteryPercent;
     ctx.currentPage        = currentPage;
     ctx.selectedMode       = selectedMode;
@@ -74,75 +78,64 @@ void buildContext(PageContext& ctx, uint8_t currentPage, uint8_t batteryPercent,
     ctx.isGamePaused       = isGamePaused;
     ctx.pauseStartTime     = pauseStartTime;
 
-    // Sector
-    ctx.sectorOwner          = sectorOwner;
-    ctx.captureStartTime     = captureStartTime;
-    ctx.currentCapturePoints = currentCapturePoints;
+    // Sector (din randul propriu)
+    ctx.sectorOwner          = (r.mode == 1 && r.status == SEC_CAPTURED) ? r.team : TEAM_NEUTRAL;
+    ctx.captureStartTime     = r.actionTime;
+    ctx.currentCapturePoints = liveCapturePoints;
     ctx.bonusIntervalMinutes = bonusIntervalMinutes;
 
-    // Bomb
-    ctx.isBombArmed      = isBombArmed;
-    ctx.isCooldownActive = isCooldownActive;
-    ctx.bombPlantTime    = bombPlantTime;
+    // Bomb (din randul propriu)
+    ctx.isBombArmed      = (r.mode == 2 && r.status == BOMB_ARMED);
+    ctx.isCooldownActive = (r.mode == 2 && r.status == BOMB_COOLDOWN);
+    ctx.bombPlantTime    = r.actionTime;
     ctx.bombTimerMs      = bombTimerMs;
-    ctx.cooldownStartTime= cooldownStartTime;
+    ctx.cooldownStartTime= r.actionTime;
     ctx.cooldownMs       = cooldownMs;
 
-    // Respawn
-    ctx.respawnTeam          = respawnTeam;
+    // Respawn (din randul propriu)
+    ctx.respawnTeam          = (r.mode == 3) ? r.team : TEAM_NEUTRAL;
     ctx.queueCount           = queueCount;
     ctx.queueHead            = queueHead;
     ctx.respawnPenaltyPoints = respawnPenaltyPoints;
     ctx.respawnQueue[0]      = respawnQueue[queueHead];
     memcpy(ctx.teamMaxRespawns, teamMaxRespawns, sizeof(teamMaxRespawns));
-    memcpy(ctx.teamKills, teamKills, sizeof(teamKills));
 
-    // Scoruri
-    for (uint8_t i = 0; i < 4; i++) ctx.liveScore[i] = liveScore[i];
+    // Scoruri si kill-uri (INSUMARE peste tabel)
+    for (uint8_t t = 0; t < 4; t++) {
+        ctx.liveScore[t]        = teamScore(t);
+        ctx.appliedPenalties[t] = appliedPenalties[t];
+        ctx.teamKills[t]        = teamKillTotal(t);
+    }
     memset(ctx.globalKills, 0, sizeof(ctx.globalKills));
-    for (uint8_t i = 0; i < 4; i++) ctx.globalKills[0][i] = teamKills[i];
-    for (uint8_t i = 0; i < 4; i++) ctx.appliedPenalties[i] = appliedPenalties[i];
+    for (uint8_t t = 0; t < 4; t++) ctx.globalKills[0][t] = teamKillTotal(t);
 
-    // --- Datele unitatii locale (reale) ---
-    uint8_t myMode = 0;
-    if (selectedMode == 0)      myMode = 1;
-    else if (selectedMode == 1) myMode = 2;
-    else if (selectedMode == 2) myMode = 3;
-
-    ctx.globalUnitMode[UNIT_ID - 1] = myMode;
-    ctx.lastSeenTime[UNIT_ID - 1]   = lastSeenTime[UNIT_ID - 1];
-
+    // Meta unitate locala
     uint8_t localBars = 0;
     if (batteryPercent >= 80)      localBars = 4;
     else if (batteryPercent >= 60) localBars = 3;
     else if (batteryPercent >= 40) localBars = 2;
     else if (batteryPercent >= 20) localBars = 1;
-    ctx.globalBattery[UNIT_ID - 1] = localBars;
+    globalBattery[UNIT_ID - 1] = localBars;
+    lastSeenTime[UNIT_ID - 1]  = millis();   // unitatea proprie e mereu "online"
 
-    if (myMode == 1) {
-        ctx.globalUnitStatus[UNIT_ID - 1] = sectorOwner;
-        ctx.globalEventTime[UNIT_ID - 1]  = captureStartTime;
-    } else if (myMode == 2) {
-        ctx.globalUnitStatus[UNIT_ID - 1] = isBombArmed ? TEAM_PLANTED : TEAM_NEUTRAL;
-        ctx.globalEventTime[UNIT_ID - 1]  = isBombArmed ? bombPlantTime
-                                          : (isCooldownActive ? cooldownStartTime : 0);
-    } else if (myMode == 3) {
-        ctx.globalUnitStatus[UNIT_ID - 1] = respawnTeam;
-        ctx.globalEventTime[UNIT_ID - 1]  = 0;
+    // Datele tuturor unitatilor pentru paginile 4/5 (din tabel)
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        UnitRow& ur = unitTable[u];
+        ctx.globalUnitMode[u]  = ur.mode;
+        ctx.globalEventTime[u] = ur.actionTime;
+        ctx.globalBattery[u]   = globalBattery[u];
+        ctx.lastSeenTime[u]    = lastSeenTime[u];
+        // status -> Team (compatibil cu randarea paginilor de unitati)
+        if (ur.mode == 1)
+            ctx.globalUnitStatus[u] = (ur.status == SEC_CAPTURED) ? ur.team : TEAM_NEUTRAL;
+        else if (ur.mode == 2)
+            ctx.globalUnitStatus[u] = (ur.status == BOMB_ARMED) ? TEAM_PLANTED : TEAM_NEUTRAL;
+        else if (ur.mode == 3)
+            ctx.globalUnitStatus[u] = ur.team;
+        else
+            ctx.globalUnitStatus[u] = TEAM_NEUTRAL;
     }
 
-    // --- Restul unitatilor (offline pana la Faza 2) ---
-    for (uint8_t i = 0; i < MAX_UNITS; i++) {
-        if (i == UNIT_ID - 1) continue;
-        ctx.globalUnitMode[i]   = globalUnitMode[i];
-        ctx.globalUnitStatus[i] = globalUnitStatus[i];
-        ctx.lastSeenTime[i]     = lastSeenTime[i];
-        ctx.globalEventTime[i]  = globalEventTime[i];
-        ctx.globalBattery[i]    = globalBattery[i];
-    }
-
-    // Scroll persistent (vine din controller) — corectie fata de varianta veche,
-    // unde era resetat la 0 in fiecare frame.
     ctx.page4ScrollIndex = page4Scroll;
     ctx.page5ScrollIndex = page5Scroll;
 }

@@ -6,6 +6,7 @@
 #include "display.h"
 #include "buttons.h"
 #include "game.h"
+#include "rfid.h"
 
 #include <esp_wifi.h>
 #include <esp_bt.h>
@@ -53,7 +54,11 @@ uint8_t rsIndex = 0, rsTimeIdx = 6, rsPenaltyIdx = 3;
 uint8_t rsLimitIdx[4] = {0, 0, 0, 0};
 uint8_t twIndex = 0, twOptionIdx = 0;
 
-// (selectedMode si respawnTeam sunt in game.cpp — modelul jocului)
+// --- RFID ---
+uint8_t  tagStatusMsg  = 0;
+uint32_t tagStatusTime = 0;
+uint32_t tagWaitStart  = 0;
+uint32_t lastRfidRead  = 0;
 
 // ============================================================
 // refreshLEDs()
@@ -62,13 +67,12 @@ uint8_t twIndex = 0, twOptionIdx = 0;
 void refreshLEDs() {
     for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], LOW);
 
-    // LED-ul echipei proprietare — mereu aprins
-    if (selectedMode == 0 && sectorOwner != TEAM_NEUTRAL)
-        digitalWrite(PIN_LEDS[sectorOwner - 1], HIGH);
-    else if (selectedMode == 1 && isBombArmed)
-        digitalWrite(PIN_LEDS[bombOwner - 1], HIGH);
-    else if (selectedMode == 2 && respawnTeam != TEAM_NEUTRAL)
-        digitalWrite(PIN_LEDS[respawnTeam - 1], HIGH);
+    // LED-ul echipei proprietare — mereu aprins (din randul propriu)
+    Team owner = TEAM_NEUTRAL;
+    if (selectedMode == 0 && myRow().status == SEC_CAPTURED) owner = myRow().team;
+    else if (selectedMode == 1 && myRow().status == BOMB_ARMED) owner = myRow().team;
+    else if (selectedMode == 2) owner = myRow().team;
+    if (owner != TEAM_NEUTRAL) digitalWrite(PIN_LEDS[owner - 1], HIGH);
 
     // LED-urile butoanelor fizic apasate
     for (uint8_t i = 0; i < 4; i++)
@@ -184,7 +188,8 @@ void setup() {
     pinMode(PIN_BUZZER, OUTPUT);
 
     buttonsInit();
-    // RFID si LoRa se adauga la pasii urmatori.
+    rfidInit();
+    // LoRa se adauga la Faza 2.
     displayInit();
 
     Serial.println("[BOOT] Setup complet.");
@@ -215,7 +220,23 @@ void loop() {
         digitalWrite(PIN_LATCH, HIGH);
     }
 
-    switch (currentState) {
+    // Citire RFID — card Admin (cardurile de puncte in joc vin la Faza 2)
+    if ((currentState == STATE_PAGES || currentState == STATE_MENU || currentState == STATE_RESPAWN_SETUP)
+        && (millis() - lastRfidRead >= 100)) {
+        RfidReadData rfid = rfidReadTag();
+    if (rfid.result == RFID_READ_ADMIN) {
+        tone(PIN_BUZZER, 2000, 200);
+        previousStateBeforeAdmin = currentState;
+        adminMenuIndex = 0;
+        adminScrollIndex = 0;
+        currentState = STATE_ADMIN_MENU;
+        needsDisplayUpdate = true;
+        Serial.println("[RFID] Admin tag detectat!");
+    }
+    lastRfidRead = millis();
+        }
+
+        switch (currentState) {
         case STATE_BOOT:
             if (handleBoot()) {
                 currentState = STATE_MENU;
@@ -269,7 +290,7 @@ void loop() {
             static uint32_t lastRefresh = 0;
             uint32_t refreshInterval = 200;
             // pe pagina 1, mod Bomb amorsata, vom avea nevoie de refresh rapid (Pasul Bomb)
-            if (selectedMode == 1 && isBombArmed && currentPage == 0) refreshInterval = 50;
+            if (selectedMode == 1 && myRow().status == BOMB_ARMED && currentPage == 0) refreshInterval = 50;
             if (needsDisplayUpdate || (millis() - lastRefresh >= refreshInterval)) {
                 buildContext(ctx, currentPage, batteryPercent, page4ScrollIndex, page5ScrollIndex);
                 drawPages(ctx);
@@ -323,9 +344,50 @@ void loop() {
             }
             break;
 
-        default:
+        case STATE_ADMIN_TAG_WRITE: {
+            // Timeout 3 secunde fara card
+            if (tagStatusMsg == 0 && millis() - tagWaitStart >= 3000) {
+                tagStatusMsg = 6;
+                tagStatusTime = millis();
+                tone(PIN_BUZZER, 200, 300);
+            }
+
+            drawTagWriter(tagStatusMsg);
+
+            // Dupa 2 secunde pe ecranul de rezultat, revenim la Tag Writer
+            if (tagStatusMsg != 0 && millis() - tagStatusTime >= 2000) {
+                currentState = STATE_ADMIN_PAGES;
+                tagStatusMsg = 0;
+                needsDisplayUpdate = true;
+                break;
+            }
+
+            // Cat timp asteptam card, incercam sa scriem
+            if (tagStatusMsg == 0) {
+                const uint16_t ptsOpt[] = {50, 100, 150, 200, 250, 500, 750, 1000, 1500, 2000, 0};
+                uint8_t type = (twOptionIdx == 10) ? 2 : 1;
+                uint16_t points = ptsOpt[twOptionIdx];
+
+                RfidWriteResult r = rfidWriteTag(type, points);
+                if (r == RFID_TIMEOUT) break;  // niciun card inca
+
+                switch (r) {
+                    case RFID_OK_NEW:       tagStatusMsg = 1; tone(PIN_BUZZER, 1500, 500); break;
+                    case RFID_OK_OVERWRITE: tagStatusMsg = 2; tone(PIN_BUZZER, 1500, 500); break;
+                    case RFID_OK_ADMIN:     tagStatusMsg = 3; tone(PIN_BUZZER, 1500, 500); break;
+                    case RFID_OK_REVOKED:   tagStatusMsg = 4; tone(PIN_BUZZER, 1500, 500); break;
+                    case RFID_DENIED:       tagStatusMsg = 5; tone(PIN_BUZZER, 200, 400);  break;
+                    default:                tagStatusMsg = 7; tone(PIN_BUZZER, 200, 300);  break;
+                }
+                tagStatusTime = millis();
+            }
+            handleButtons();
             break;
-    }
+        }
+
+                    default:
+                        break;
+        }
 }
 
 // ============================================================
@@ -342,6 +404,7 @@ void onShortPress(uint8_t btnIndex) {
             needsDisplayUpdate = true;
         } else if (btnIndex == 3) {     // GALBEN — confirm
             selectedMode = menuIndex;
+            myRow().mode = (selectedMode == 0) ? 1 : (selectedMode == 1) ? 2 : 3;
             if (selectedMode == 2) {
                 currentState = STATE_RESPAWN_SETUP;
             } else {
@@ -355,7 +418,8 @@ void onShortPress(uint8_t btnIndex) {
         }
 
     } else if (currentState == STATE_RESPAWN_SETUP) {
-        respawnTeam = (Team)(btnIndex + 1);
+        myRow().mode = 3;
+        myRow().team = (Team)(btnIndex + 1);
         currentState = STATE_LOADING;
         loadingStartTime = millis();
         refreshLEDs();
@@ -412,10 +476,9 @@ void onShortPress(uint8_t btnIndex) {
             } else if (adminMenuIndex == 5) {
                 // CHANGE MODE
                 selectedMode = -1;
-                sectorOwner = TEAM_NEUTRAL;
-                isBombArmed = false;
-                isCooldownActive = false;
-                respawnTeam = TEAM_NEUTRAL;
+                myRow() = UnitRow{};       // reset complet randul propriu
+                liveCapturePoints = 0;
+                lastPointTick = 0;
                 queueCount = queueHead = queueTail = 0;
                 currentState = STATE_MENU;
                 menuIndex = 0;
@@ -544,9 +607,12 @@ void onShortPress(uint8_t btnIndex) {
                     twOptionIdx = (twOptionIdx + 1) % 11;
                     needsDisplayUpdate = true;
                 } else {
-                    // WRITE — scrierea efectiva pe card vine la Pasul 5 (RFID)
+                    // WRITE — pornim scrierea pe card
+                    tagStatusMsg = 0;
+                    tagWaitStart = millis();
+                    currentState = STATE_ADMIN_TAG_WRITE;
                     tone(PIN_BUZZER, 1000, 50);
-                    Serial.println("[TAG] Write — vine la Pasul 5 (RFID).");
+                    needsDisplayUpdate = true;
                 }
             }
         }

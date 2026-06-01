@@ -1168,3 +1168,40 @@ void drawPowerOffScreen() {
     display.print(msg);
     display.display();
 }
+
+// ============================================================
+// drawTagWriter()
+// ============================================================
+void drawTagWriter(uint8_t statusMsg) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    if (statusMsg == 0) {
+        const char* l1 = "READY TO WRITE";
+        uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
+        display.setCursor(x, 24);
+        display.print(l1);
+        const char* l2 = "Tap the card...";
+        x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
+        display.setCursor(x, 36);
+        display.print(l2);
+    } else {
+        const char* big = "";
+        const char* small = "";
+        if (statusMsg == 1)      { big = "SUCCESS!"; small = "Card saved"; }
+        else if (statusMsg == 2) { big = "SUCCESS!"; small = "Card overwritten"; }
+        else if (statusMsg == 3) { big = "SUCCESS!"; small = "Admin tag saved"; }
+        else if (statusMsg == 4) { big = "REVOKED";  small = "Card is now empty"; }
+        else if (statusMsg == 5) { big = "DENIED";   small = "Card is Admin tag!"; }
+        else if (statusMsg == 6) { big = "TIMEOUT";  small = "No card detected"; }
+        else if (statusMsg == 7) { big = "ERROR!";   small = "Read/Write failed"; }
+        display.setTextSize(2);
+        uint8_t x = (SCREEN_WIDTH - (strlen(big) * 12)) / 2;
+        display.setCursor(x, 16);
+        display.print(big);
+        display.setTextSize(1);
+        x = (SCREEN_WIDTH - (strlen(small) * 6)) / 2;
+        display.setCursor(x, 40);
+        display.print(small);
+    }
+    display.display();
+}

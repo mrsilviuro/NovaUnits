@@ -109,3 +109,6 @@ void drawAdminPages(const AdminContext& ac);
 
 void drawAdminSaved();      // ecran "SAVED"
 void drawPowerOffScreen();  // ecran "Turning Off ..."
+
+// Ecran Tag Writer (status scriere card)
+void drawTagWriter(uint8_t statusMsg);
