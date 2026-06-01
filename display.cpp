@@ -1205,3 +1205,50 @@ void drawTagWriter(uint8_t statusMsg) {
     }
     display.display();
 }
+
+// ============================================================
+// drawActionScreen() — bara de progres pentru actiuni (hold)
+// ============================================================
+void drawActionScreen(ActionType actionType, uint8_t teamIndex, uint32_t elapsed, uint32_t totalMs) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* actText = "";
+    if (actionType == ACT_CAPTURE)         actText = "CAPTURING SECTOR...";
+    else if (actionType == ACT_NEUTRALIZE) actText = "NEUTRALIZING...";
+    else if (actionType == ACT_ARM)        actText = "ARMING BOMB...";
+    else if (actionType == ACT_DEFUSE)     actText = "DEFUSING BOMB...";
+    uint8_t x = (SCREEN_WIDTH - (strlen(actText) * 6)) / 2;
+    display.setCursor(x, 9);
+    display.print(actText);
+
+    const char* teamName = TEAM_NAMES[teamIndex];
+    x = (SCREEN_WIDTH - (strlen(teamName) * 6)) / 2;
+    display.setCursor(x, 21);
+    display.print(teamName);
+
+    display.drawRect(14, 35, 100, 12, SSD1306_WHITE);
+    uint8_t barW = (uint8_t)((uint32_t)96 * elapsed / totalMs);
+    if (barW > 96) barW = 96;
+    if (barW > 0) display.fillRect(16, 37, barW, 8, SSD1306_WHITE);
+
+    uint32_t remaining = (elapsed < totalMs) ? (totalMs - elapsed) / 1000 + 1 : 0;
+    char timeBuf[8];
+    snprintf(timeBuf, sizeof(timeBuf), "%us", remaining);
+    x = (SCREEN_WIDTH - (strlen(timeBuf) * 6)) / 2;
+    display.setCursor(x, 51);
+    display.print(timeBuf);
+    display.display();
+}
+
+// ============================================================
+// drawSuccessScreen()
+// ============================================================
+void drawSuccessScreen() {
+    display.clearDisplay();
+    display.setTextSize(2);
+    const char* msg = "SUCCESS!";
+    uint8_t x = (SCREEN_WIDTH - (strlen(msg) * 12)) / 2;
+    display.setCursor(x, 24);
+    display.print(msg);
+    display.display();
+}

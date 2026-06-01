@@ -112,3 +112,7 @@ void drawPowerOffScreen();  // ecran "Turning Off ..."
 
 // Ecran Tag Writer (status scriere card)
 void drawTagWriter(uint8_t statusMsg);
+
+// Ecrane gameplay
+void drawActionScreen(ActionType actionType, uint8_t teamIndex, uint32_t elapsed, uint32_t totalMs);
+void drawSuccessScreen();

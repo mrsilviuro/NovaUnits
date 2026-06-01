@@ -60,6 +60,14 @@ uint32_t tagStatusTime = 0;
 uint32_t tagWaitStart  = 0;
 uint32_t lastRfidRead  = 0;
 
+// --- Actiuni / gameplay ---
+ActionType currentAction    = ACT_NONE;
+uint8_t    actingTeam       = 0;
+uint32_t   actionStartTime  = 0;
+uint32_t   successStartTime = 0;
+bool       isRelayActive    = false;
+uint32_t   relayTurnOffTime = 0;
+
 // ============================================================
 // refreshLEDs()
 // Aprinde LED-ul echipei proprietare + orice buton tinut fizic.
@@ -163,6 +171,66 @@ void syncAdminIndices() {
 }
 
 // ============================================================
+// handleActionProgress() — hold-to-progress + aplicare actiune
+// ============================================================
+void handleActionProgress() {
+    uint32_t now = millis();
+    uint32_t elapsed = now - actionStartTime;
+
+    // 1. Buton eliberat -> ANULARE
+    if (digitalRead(PIN_BTNS[actingTeam]) == HIGH) {
+        currentState = STATE_PAGES;
+        currentPage = 0;
+        currentAction = ACT_NONE;
+        needsDisplayUpdate = true;
+        tone(PIN_BUZZER, 300, 300);
+        refreshLEDs();
+        Serial.println("[ACTION] Anulat - buton eliberat.");
+        return;
+    }
+
+    // 2. Timp atins -> SUCCESS
+    if (elapsed >= actionTimeMs) {
+        if (currentAction == ACT_CAPTURE) {
+            myRow().status     = SEC_CAPTURED;
+            myRow().team       = (Team)(actingTeam + 1);
+            myRow().actionTime = now;
+            liveCapturePoints  = 0;
+            lastPointTick      = now;
+            Serial.print("[SECTOR] Cucerit de: ");
+            Serial.println(TEAM_NAMES[actingTeam]);
+        } else if (currentAction == ACT_NEUTRALIZE) {
+            // comitem punctele live la totalul echipei care detinea sectorul
+            if (myRow().team != TEAM_NEUTRAL)
+                myRow().savedPoints[myRow().team - 1] += (int32_t)liveCapturePoints;
+            myRow().status     = SEC_NEUTRAL;
+            myRow().team       = TEAM_NEUTRAL;
+            myRow().actionTime = now;
+            liveCapturePoints  = 0;
+            lastPointTick      = 0;
+            Serial.print("[SECTOR] Neutralizat de: ");
+            Serial.println(TEAM_NAMES[actingTeam]);
+        }
+
+        // Releu scurt (sirena)
+        digitalWrite(PIN_RELAY, LOW);
+        isRelayActive = true;
+        relayTurnOffTime = now + 5000;
+
+        currentState = STATE_SUCCESS;
+        successStartTime = now;
+        currentAction = ACT_NONE;
+        drawSuccessScreen();
+        refreshLEDs();
+        tone(PIN_BUZZER, 1800, 600);
+        return;
+    }
+
+    // 3. In desfasurare -> bara de progres
+    drawActionScreen(currentAction, actingTeam, elapsed, actionTimeMs);
+}
+
+// ============================================================
 // setup()
 // ============================================================
 void setup() {
@@ -236,7 +304,26 @@ void loop() {
     lastRfidRead = millis();
         }
 
-        switch (currentState) {
+        // Sector — puncte LIVE (3 + bonus la fiecare 10s cat timp e cucerit)
+        if (selectedMode == 0 && myRow().status == SEC_CAPTURED && lastPointTick == 0)
+            lastPointTick = now;
+    if (!isTimeOut && !isGamePaused && selectedMode == 0 && myRow().status == SEC_CAPTURED) {
+        if (now - lastPointTick >= 10000) {
+            uint32_t minutesHeld = (now - myRow().actionTime) / 60000;
+            uint32_t bonus = (bonusIntervalMinutes > 0) ? (minutesHeld / bonusIntervalMinutes) : 0;
+            if (bonus > 3) bonus = 3;
+            liveCapturePoints += (3 + bonus);
+            lastPointTick += 10000;
+        }
+    }
+
+    // Releu — oprire non-blocking
+    if (isRelayActive && millis() >= relayTurnOffTime) {
+        digitalWrite(PIN_RELAY, HIGH);
+        isRelayActive = false;
+    }
+
+    switch (currentState) {
         case STATE_BOOT:
             if (handleBoot()) {
                 currentState = STATE_MENU;
@@ -300,6 +387,19 @@ void loop() {
             handleButtons();
             break;
         }
+
+        case STATE_ACTION:
+            handleActionProgress();
+            break;
+
+        case STATE_SUCCESS:
+            if (millis() - successStartTime >= 2000) {
+                currentState = STATE_PAGES;
+                currentPage = 0;
+                needsDisplayUpdate = true;
+                refreshLEDs();
+            }
+            break;
 
         case STATE_ADMIN_MENU:
             if (needsDisplayUpdate) {
@@ -620,8 +720,30 @@ void onShortPress(uint8_t btnIndex) {
 }
 
 void onLongPress(uint8_t btnIndex) {
-    // Actiunile de gameplay (capture / arm / defuse) se adauga la pasii urmatori.
-    (void)btnIndex;
+    // Actiunile sunt permise doar pe pagina 1, in STATE_PAGES
+    if (currentState != STATE_PAGES || isTimeOut) return;
+    if (isGamePaused) { tone(PIN_BUZZER, 200, 200); return; }
+    if (gameTimeLeftSeconds > 0 && !isGameTimerRunning) { tone(PIN_BUZZER, 200, 200); return; }
+
+    Team btnTeam = (Team)(btnIndex + 1);
+
+    if (selectedMode == 0) {  // SECTOR
+        if (myRow().status == SEC_NEUTRAL) {
+            currentAction = ACT_CAPTURE;
+        } else if (btnTeam == myRow().team) {
+            tone(PIN_BUZZER, 200, 200);   // echipa proprie nu-si neutralizeaza sectorul
+            return;
+        } else {
+            currentAction = ACT_NEUTRALIZE;
+        }
+        actingTeam = btnIndex;
+        actionStartTime = millis();
+        currentState = STATE_ACTION;
+        needsDisplayUpdate = true;
+        tone(PIN_BUZZER, 1000, 100);
+        Serial.println(currentAction == ACT_CAPTURE ? "[SECTOR] Start CAPTURE" : "[SECTOR] Start NEUTRALIZE");
+    }
+    // BOMB (arm/defuse) -> pasul urmator
 }
 
 void onAdminCombo() {
