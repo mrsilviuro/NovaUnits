@@ -100,15 +100,34 @@ void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode);
 // AdminContext — datele celor 4 sub-pagini (0=Game,1=Bomb,2=Respawn,3=TagWriter)
 struct AdminContext {
     uint8_t selectedPage;
-    uint8_t gsIndex, gsWinCond, gsTimeLimit, gsBonus, gsActionIdx;
-    uint8_t bsIndex, bsTimerIdx, bsCooldownIdx, bsExpPtsIdx, bsDefPtsIdx;
-    uint8_t rsIndex, rsTimeIdx, rsPenaltyIdx, rsLimitIdx[4];
-    uint8_t twIndex, twOptionIdx;
+    // Game Settings
+    uint8_t gsIndex;
+    uint8_t gsWinCond;
+    uint8_t gsTimeLimit;
+    uint8_t gsBonus;
+    uint8_t gsActionIdx;
+    // Bomb Settings
+    uint8_t bsIndex;
+    uint8_t bsTimerIdx;
+    uint8_t bsCooldownIdx;
+    uint8_t bsExpPtsIdx;
+    uint8_t bsDefPtsIdx;
+    // Respawn Settings
+    uint8_t rsIndex;
+    uint8_t rsTimeIdx;
+    uint8_t rsPenaltyIdx;
+    uint8_t rsLimitIdx[4];
+    // Tag Writer
+    uint8_t twIndex;
+    uint8_t twOptionIdx;
 };
 void drawAdminPages(const AdminContext& ac);
 
-void drawAdminSaved();      // ecran "SAVED"
-void drawPowerOffScreen();  // ecran "Turning Off ..."
+// Ecran "SAVED" dupa confirmarea setarilor
+void drawAdminSaved();
+
+// Ecran "Turning Off ..."
+void drawPowerOffScreen();
 
 // Ecran Tag Writer (status scriere card)
 void drawTagWriter(uint8_t statusMsg);
@@ -116,3 +135,5 @@ void drawTagWriter(uint8_t statusMsg);
 // Ecrane gameplay
 void drawActionScreen(ActionType actionType, uint8_t teamIndex, uint32_t elapsed, uint32_t totalMs);
 void drawSuccessScreen();
+
+void drawBoomScreen();

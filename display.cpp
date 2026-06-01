@@ -330,9 +330,20 @@ void drawPageHeader(uint8_t currentPage, uint8_t batteryPercent) {
 
     display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
 }
-// ============================================================
-// drawPages()
-// ============================================================
+
+// Formateaza un numar de secunde ca "Xh XXmin XXsec", omitand orele/minutele cand sunt 0
+static void formatElapsed(uint32_t totalSec, char* buf, size_t bufLen) {
+    uint32_t h = totalSec / 3600;
+    uint32_t m = (totalSec % 3600) / 60;
+    uint32_t s = totalSec % 60;
+    if (h > 0)
+        snprintf(buf, bufLen, "%uh %02umin %02usec", (unsigned)h, (unsigned)m, (unsigned)s);
+    else if (m > 0)
+        snprintf(buf, bufLen, "%umin %02usec", (unsigned)m, (unsigned)s);
+    else
+        snprintf(buf, bufLen, "%usec", (unsigned)s);
+}
+
 void drawPages(const PageContext& ctx) {
     display.clearDisplay();
     drawPageHeader(ctx.currentPage, ctx.batteryPercent);
@@ -813,7 +824,6 @@ void drawPages(const PageContext& ctx) {
         // ====================================================
         case 4: {
             uint32_t now = millis();
-            bool showBat = ((now / 3000) % 2 == 1);
             uint8_t activeUnits[MAX_UNITS];
             uint8_t count = 0;
             for (uint8_t i = 0; i < MAX_UNITS; i++) {
@@ -839,37 +849,17 @@ void drawPages(const PageContext& ctx) {
                         display.print("- ");
                     }
                     display.print(UNIT_NAMES[uid]);
-                    // Calcul text sync
-                    char syncText[15];
-                    bool isOffline = false;
+                    // Timp scurs de la ultimul semnal (h/min/sec)
+                    char syncText[20];
                     if (ctx.lastSeenTime[uid] == 0) {
                         strcpy(syncText, "--");
-                        isOffline = true;
                     } else {
                         uint32_t el = (now - ctx.lastSeenTime[uid]) / 1000;
-                        if (el >= 70) {
-                            strcpy(syncText, "OFFLINE");
-                            isOffline = true;
-                        } else
-                            snprintf(syncText, sizeof(syncText), "%u sec", el);
+                        formatElapsed(el, syncText, sizeof(syncText));
                     }
-                    if (showBat) {
-                        // Bateria se afiseaza mereu la randul ei, online sau offline
-                        uint8_t lv = ctx.globalBattery[uid];
-                        uint8_t batX = SCREEN_WIDTH - 21 - rightMargin;
-                        uint8_t batY = y - 1;
-                        display.fillRect(batX, batY + 2, 2, 5, SSD1306_WHITE);
-                        display.drawRect(batX + 2, batY, 19, 9, SSD1306_WHITE);
-                        for (uint8_t b = 0; b < lv; b++) {
-                            uint8_t bx = (batX + 16) - (b * 4);
-                            display.fillRect(bx, batY + 2, 3, 5, SSD1306_WHITE);
-                        }
-                    } else {
-                        // Textul: secundele de la ultimul pachet sau OFFLINE
-                        uint8_t tw = strlen(syncText) * 6;
-                        display.setCursor(SCREEN_WIDTH - tw - rightMargin, y);
-                        display.print(syncText);
-                    }
+                    uint8_t tw = strlen(syncText) * 6;
+                    display.setCursor(SCREEN_WIDTH - tw - rightMargin, y);
+                    display.print(syncText);
                     shown++;
                 }
                 drawScrollbar(count, 4, scroll, 13, 51);
@@ -958,9 +948,6 @@ void drawPages(const PageContext& ctx) {
     display.display();
 }
 
-// ============================================================
-// drawAdminMenu()
-// ============================================================
 void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) {
     display.clearDisplay();
     display.setTextSize(1);
@@ -973,14 +960,19 @@ void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) 
     uint8_t shown = 0;
     for (uint8_t i = scrollIndex; i < 8; i++) {
         if (shown >= 5) break;
-        if (i == 5 && selectedMode == -1) continue;  // Change Mode ascuns daca nu avem mod
+
+        // Ascundem Change Mode (index 5) daca nu avem mod selectat
+        if (i == 5 && selectedMode == -1) continue;
+
         display.setCursor(0, 14 + (shown * 10));
+
         if (i == menuIndex) {
             display.drawBitmap(0, 14 + (shown * 10), ARROW_RIGHT, 5, 7, SSD1306_WHITE);
             display.setCursor(12, 14 + (shown * 10));
         } else {
             display.print("  ");
         }
+
         display.print(items[i]);
         shown++;
     }
@@ -989,10 +981,6 @@ void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) 
     drawScrollbar(total, 5, scrollIndex, 13, 51);
     display.display();
 }
-
-// ============================================================
-// drawAdminPages()
-// ============================================================
 void drawAdminPages(const AdminContext& ac) {
     display.clearDisplay();
     display.setTextSize(1);
@@ -1134,18 +1122,15 @@ void drawAdminPages(const AdminContext& ac) {
         display.setCursor(x, 50);
         display.print(buf);
     }
-    // Header peste continut
+    // Header peste continut (tehnica din codul vechi)
     display.fillRect(0, 0, SCREEN_WIDTH, 12, SSD1306_BLACK);
+    display.setCursor(0, 0);
     uint8_t hx = (SCREEN_WIDTH - (strlen(items[ac.selectedPage]) * 6)) / 2;
     display.setCursor(hx, 0);
     display.print(items[ac.selectedPage]);
     display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
     display.display();
 }
-
-// ============================================================
-// drawAdminSaved()
-// ============================================================
 void drawAdminSaved() {
     display.clearDisplay();
     display.setTextSize(2);
@@ -1156,9 +1141,6 @@ void drawAdminSaved() {
     display.display();
 }
 
-// ============================================================
-// drawPowerOffScreen()
-// ============================================================
 void drawPowerOffScreen() {
     display.clearDisplay();
     display.setTextSize(1);
@@ -1169,13 +1151,11 @@ void drawPowerOffScreen() {
     display.display();
 }
 
-// ============================================================
-// drawTagWriter()
-// ============================================================
 void drawTagWriter(uint8_t statusMsg) {
     display.clearDisplay();
     display.setTextSize(1);
     if (statusMsg == 0) {
+        // Asteapta card
         const char* l1 = "READY TO WRITE";
         uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
         display.setCursor(x, 24);
@@ -1187,13 +1167,28 @@ void drawTagWriter(uint8_t statusMsg) {
     } else {
         const char* big = "";
         const char* small = "";
-        if (statusMsg == 1)      { big = "SUCCESS!"; small = "Card saved"; }
-        else if (statusMsg == 2) { big = "SUCCESS!"; small = "Card overwritten"; }
-        else if (statusMsg == 3) { big = "SUCCESS!"; small = "Admin tag saved"; }
-        else if (statusMsg == 4) { big = "REVOKED";  small = "Card is now empty"; }
-        else if (statusMsg == 5) { big = "DENIED";   small = "Card is Admin tag!"; }
-        else if (statusMsg == 6) { big = "TIMEOUT";  small = "No card detected"; }
-        else if (statusMsg == 7) { big = "ERROR!";   small = "Read/Write failed"; }
+        if (statusMsg == 1) {
+            big = "SUCCESS!";
+            small = "Card saved";
+        } else if (statusMsg == 2) {
+            big = "SUCCESS!";
+            small = "Card overwritten";
+        } else if (statusMsg == 3) {
+            big = "SUCCESS!";
+            small = "Admin tag saved";
+        } else if (statusMsg == 4) {
+            big = "REVOKED";
+            small = "Card is now empty";
+        } else if (statusMsg == 5) {
+            big = "DENIED";
+            small = "Card is Admin tag!";
+        } else if (statusMsg == 6) {
+            big = "TIMEOUT";
+            small = "No card detected";
+        } else if (statusMsg == 7) {
+            big = "ERROR!";
+            small = "Read/Write failed";
+        }
         display.setTextSize(2);
         uint8_t x = (SCREEN_WIDTH - (strlen(big) * 12)) / 2;
         display.setCursor(x, 16);
@@ -1213,7 +1208,7 @@ void drawActionScreen(ActionType actionType, uint8_t teamIndex, uint32_t elapsed
     display.clearDisplay();
     display.setTextSize(1);
     const char* actText = "";
-    if (actionType == ACT_CAPTURE)         actText = "CAPTURING SECTOR...";
+    if (actionType == ACT_CAPTURE)        actText = "CAPTURING SECTOR...";
     else if (actionType == ACT_NEUTRALIZE) actText = "NEUTRALIZING...";
     else if (actionType == ACT_ARM)        actText = "ARMING BOMB...";
     else if (actionType == ACT_DEFUSE)     actText = "DEFUSING BOMB...";
@@ -1247,6 +1242,19 @@ void drawSuccessScreen() {
     display.clearDisplay();
     display.setTextSize(2);
     const char* msg = "SUCCESS!";
+    uint8_t x = (SCREEN_WIDTH - (strlen(msg) * 12)) / 2;
+    display.setCursor(x, 24);
+    display.print(msg);
+    display.display();
+}
+
+// ============================================================
+// drawBoomScreen()
+// ============================================================
+void drawBoomScreen() {
+    display.clearDisplay();
+    display.setTextSize(2);
+    const char* msg = "BOOOOOM!";
     uint8_t x = (SCREEN_WIDTH - (strlen(msg) * 12)) / 2;
     display.setCursor(x, 24);
     display.print(msg);

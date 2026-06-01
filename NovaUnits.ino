@@ -67,6 +67,11 @@ uint32_t   actionStartTime  = 0;
 uint32_t   successStartTime = 0;
 bool       isRelayActive    = false;
 uint32_t   relayTurnOffTime = 0;
+bool       isBombBeeping    = false;
+uint8_t    flashStep        = 0;
+uint32_t   flashStepStart   = 0;
+
+// (selectedMode si starea de joc sunt in game.cpp — modelul/tabelul)
 
 // ============================================================
 // refreshLEDs()
@@ -112,62 +117,72 @@ void updateBattery() {
 AdminContext buildAdminContext() {
     AdminContext ac;
     ac.selectedPage = adminSelectedPage;
-    ac.gsIndex = gsIndex; ac.gsWinCond = gsWinCond; ac.gsTimeLimit = gsTimeLimit;
-    ac.gsBonus = gsBonus; ac.gsActionIdx = gsActionIdx;
-    ac.bsIndex = bsIndex; ac.bsTimerIdx = bsTimerIdx; ac.bsCooldownIdx = bsCooldownIdx;
-    ac.bsExpPtsIdx = bsExpPtsIdx; ac.bsDefPtsIdx = bsDefPtsIdx;
-    ac.rsIndex = rsIndex; ac.rsTimeIdx = rsTimeIdx; ac.rsPenaltyIdx = rsPenaltyIdx;
+    ac.gsIndex = gsIndex;
+    ac.gsWinCond = gsWinCond;
+    ac.gsTimeLimit = gsTimeLimit;
+    ac.gsBonus = gsBonus;
+    ac.gsActionIdx = gsActionIdx;
+    ac.bsIndex = bsIndex;
+    ac.bsTimerIdx = bsTimerIdx;
+    ac.bsCooldownIdx = bsCooldownIdx;
+    ac.bsExpPtsIdx = bsExpPtsIdx;
+    ac.bsDefPtsIdx = bsDefPtsIdx;
+    ac.rsIndex = rsIndex;
+    ac.rsTimeIdx = rsTimeIdx;
+    ac.rsPenaltyIdx = rsPenaltyIdx;
     for (uint8_t i = 0; i < 4; i++) ac.rsLimitIdx[i] = rsLimitIdx[i];
-    ac.twIndex = twIndex; ac.twOptionIdx = twOptionIdx;
+    ac.twIndex = twIndex;
+    ac.twOptionIdx = twOptionIdx;
     return ac;
 }
 
 // ============================================================
 // syncAdminIndices() — recalculeaza indicii admin din valorile modelului
+// (ca sub-pagina sa afiseze setarile curente cand o deschizi)
 // ============================================================
 void syncAdminIndices() {
     gsIndex = bsIndex = rsIndex = twIndex = 0;
 
     const uint32_t tl[] = {0, 900, 1800, 3600, 7200, 10800, 14400, 18000,
-        21600, 25200, 28800, 32400, 36000, 39600, 43200, 86400};
-        for (uint8_t i = 0; i < 16; i++)
-            if (tl[i] == gameTimeLeftSeconds) { gsTimeLimit = i; break; }
+                           21600, 25200, 28800, 32400, 36000, 39600, 43200, 86400};
+    for (uint8_t i = 0; i < 16; i++)
+        if (tl[i] == gameTimeLeftSeconds) { gsTimeLimit = i; break; }
 
-            const uint16_t bn[] = {0, 15, 30, 60, 120, 180, 240};
-        for (uint8_t i = 0; i < 7; i++)
-            if (bn[i] == bonusIntervalMinutes) { gsBonus = i; break; }
+    const uint16_t bn[] = {0, 15, 30, 60, 120, 180, 240};
+    for (uint8_t i = 0; i < 7; i++)
+        if (bn[i] == bonusIntervalMinutes) { gsBonus = i; break; }
 
-            gsWinCond = (uint8_t)currentWinCondition;
+    gsWinCond = (uint8_t)currentWinCondition;
 
-        const uint32_t at[] = {5000, 10000, 15000, 20000};
-        for (uint8_t i = 0; i < 4; i++)
-            if (at[i] == actionTimeMs) { gsActionIdx = i; break; }
+    const uint32_t at[] = {5000, 10000, 15000, 20000};
+    for (uint8_t i = 0; i < 4; i++)
+        if (at[i] == actionTimeMs) { gsActionIdx = i; break; }
 
-            const uint32_t tv[] = {5, 10, 15, 20, 30, 45, 60, 120};
-        for (uint8_t i = 0; i < 8; i++)
-            if (tv[i] * 60000UL == bombTimerMs) { bsTimerIdx = i; break; }
-            for (uint8_t i = 0; i < 8; i++)
-                if (tv[i] * 60000UL == cooldownMs) { bsCooldownIdx = i; break; }
+    const uint32_t tv[] = {5, 10, 15, 20, 30, 45, 60, 120};
+    for (uint8_t i = 0; i < 8; i++)
+        if (tv[i] * 60000UL == bombTimerMs) { bsTimerIdx = i; break; }
+    for (uint8_t i = 0; i < 8; i++)
+        if (tv[i] * 60000UL == cooldownMs) { bsCooldownIdx = i; break; }
 
-                const uint32_t pv[] = {50, 100, 200, 300, 400, 500, 600, 700,
-                    800, 900, 1000, 1500, 2000, 2500, 3000};
-                    for (uint8_t i = 0; i < 15; i++)
-                        if (pv[i] == bombPointsExplode) { bsExpPtsIdx = i; break; }
-                        for (uint8_t i = 0; i < 15; i++)
-                            if (pv[i] == bombPointsDefuse) { bsDefPtsIdx = i; break; }
+    const uint32_t pv[] = {50, 100, 200, 300, 400, 500, 600, 700,
+                           800, 900, 1000, 1500, 2000, 2500, 3000};
+    for (uint8_t i = 0; i < 15; i++)
+        if (pv[i] == bombPointsExplode) { bsExpPtsIdx = i; break; }
+    for (uint8_t i = 0; i < 15; i++)
+        if (pv[i] == bombPointsDefuse) { bsDefPtsIdx = i; break; }
 
-                            const uint32_t ts[] = {10, 30, 60, 120, 180, 240, 300, 600, 900, 1200, 1500, 1800};
-                        for (uint8_t i = 0; i < 12; i++)
-                            if (ts[i] * 1000UL == respawnTimeMs) { rsTimeIdx = i; break; }
+    const uint32_t ts[] = {10, 30, 60, 120, 180, 240, 300, 600, 900, 1200, 1500, 1800};
+    for (uint8_t i = 0; i < 12; i++)
+        if (ts[i] * 1000UL == respawnTimeMs) { rsTimeIdx = i; break; }
 
-                            const uint16_t pp[] = {0, 5, 10, 25, 50, 75, 100};
-                        for (uint8_t i = 0; i < 7; i++)
-                            if (pp[i] == respawnPenaltyPoints) { rsPenaltyIdx = i; break; }
+    const uint16_t pp[] = {0, 5, 10, 25, 50, 75, 100};
+    for (uint8_t i = 0; i < 7; i++)
+        if (pp[i] == respawnPenaltyPoints) { rsPenaltyIdx = i; break; }
 
-                            const uint16_t lm[] = {0, 10, 25, 50, 75, 100, 200, 300, 400, 500, 1000};
-                        for (uint8_t t = 0; t < 4; t++)
-                            for (uint8_t i = 0; i < 11; i++)
-                                if (lm[i] == teamMaxRespawns[t]) { rsLimitIdx[t] = i; break; }
+    const uint16_t lm[] = {0, 10, 25, 50, 75, 100, 200, 300, 400, 500, 1000};
+    for (uint8_t t = 0; t < 4; t++)
+        for (uint8_t i = 0; i < 11; i++)
+            if (lm[i] == teamMaxRespawns[t]) { rsLimitIdx[t] = i; break; }
 }
 
 // ============================================================
@@ -176,6 +191,14 @@ void syncAdminIndices() {
 void handleActionProgress() {
     uint32_t now = millis();
     uint32_t elapsed = now - actionStartTime;
+
+    // 0. Dezamorsam, dar bomba a explodat intre timp -> BOOM
+    if (currentAction == ACT_DEFUSE && myRow().status != BOMB_ARMED) {
+        currentAction = ACT_NONE;
+        currentState = STATE_BOOM;
+        needsDisplayUpdate = true;
+        return;
+    }
 
     // 1. Buton eliberat -> ANULARE
     if (digitalRead(PIN_BTNS[actingTeam]) == HIGH) {
@@ -209,6 +232,21 @@ void handleActionProgress() {
             liveCapturePoints  = 0;
             lastPointTick      = 0;
             Serial.print("[SECTOR] Neutralizat de: ");
+            Serial.println(TEAM_NAMES[actingTeam]);
+        } else if (currentAction == ACT_ARM) {
+            myRow().status     = BOMB_ARMED;
+            myRow().team       = (Team)(actingTeam + 1);
+            myRow().actionTime = now;
+            noTone(PIN_BUZZER);
+            Serial.print("[BOMB] Amorsata de: ");
+            Serial.println(TEAM_NAMES[actingTeam]);
+        } else if (currentAction == ACT_DEFUSE) {
+            myRow().status     = BOMB_COOLDOWN;
+            myRow().team       = TEAM_NEUTRAL;
+            myRow().actionTime = now;                 // start cooldown
+            myRow().savedPoints[actingTeam] += (int32_t)bombPointsDefuse;
+            noTone(PIN_BUZZER);
+            Serial.print("[BOMB] Dezamorsata de: ");
             Serial.println(TEAM_NAMES[actingTeam]);
         }
 
@@ -290,23 +328,23 @@ void loop() {
 
     // Citire RFID — card Admin (cardurile de puncte in joc vin la Faza 2)
     if ((currentState == STATE_PAGES || currentState == STATE_MENU || currentState == STATE_RESPAWN_SETUP)
-        && (millis() - lastRfidRead >= 100)) {
+            && (millis() - lastRfidRead >= 100)) {
         RfidReadData rfid = rfidReadTag();
-    if (rfid.result == RFID_READ_ADMIN) {
-        tone(PIN_BUZZER, 2000, 200);
-        previousStateBeforeAdmin = currentState;
-        adminMenuIndex = 0;
-        adminScrollIndex = 0;
-        currentState = STATE_ADMIN_MENU;
-        needsDisplayUpdate = true;
-        Serial.println("[RFID] Admin tag detectat!");
-    }
-    lastRfidRead = millis();
+        if (rfid.result == RFID_READ_ADMIN) {
+            tone(PIN_BUZZER, 2000, 200);
+            previousStateBeforeAdmin = currentState;
+            adminMenuIndex = 0;
+            adminScrollIndex = 0;
+            currentState = STATE_ADMIN_MENU;
+            needsDisplayUpdate = true;
+            Serial.println("[RFID] Admin tag detectat!");
         }
+        lastRfidRead = millis();
+    }
 
-        // Sector — puncte LIVE (3 + bonus la fiecare 10s cat timp e cucerit)
-        if (selectedMode == 0 && myRow().status == SEC_CAPTURED && lastPointTick == 0)
-            lastPointTick = now;
+    // Sector — puncte LIVE (3 + bonus la fiecare 10s cat timp e cucerit)
+    if (selectedMode == 0 && myRow().status == SEC_CAPTURED && lastPointTick == 0)
+        lastPointTick = now;
     if (!isTimeOut && !isGamePaused && selectedMode == 0 && myRow().status == SEC_CAPTURED) {
         if (now - lastPointTick >= 10000) {
             uint32_t minutesHeld = (now - myRow().actionTime) / 60000;
@@ -314,6 +352,86 @@ void loop() {
             if (bonus > 3) bonus = 3;
             liveCapturePoints += (3 + bonus);
             lastPointTick += 10000;
+        }
+    }
+
+    // Timer bomba + beep accelerat + explozie
+    if (selectedMode == 1 && myRow().status == BOMB_ARMED && !isGamePaused) {
+        uint32_t elapsed = now - myRow().actionTime;
+        uint32_t remaining = (elapsed < bombTimerMs) ? (bombTimerMs - elapsed) : 0;
+
+        if (elapsed >= bombTimerMs) {
+            // EXPLOZIE
+            Team explodedBy = myRow().team;
+            myRow().status     = BOMB_COOLDOWN;
+            myRow().team       = TEAM_NEUTRAL;
+            myRow().actionTime = now;                 // start cooldown
+            if (explodedBy != TEAM_NEUTRAL)
+                myRow().savedPoints[explodedBy - 1] += (int32_t)bombPointsExplode;
+            isBombBeeping = false;
+            digitalWrite(PIN_RELAY, LOW);
+            isRelayActive = true;
+            relayTurnOffTime = now + 10000;
+            noTone(PIN_BUZZER);
+            currentState = STATE_BOOM;
+            needsDisplayUpdate = true;
+            refreshLEDs();
+            Serial.println("[BOMB] EXPLOZIE!");
+        } else {
+            uint32_t interval = 6000;
+            if (remaining <= 3000)       interval = 100;
+            else if (remaining <= 6000)  interval = 300;
+            else if (remaining <= 10000) interval = 500;
+            else if (remaining <= 20000) interval = 1000;
+            else if (remaining <= 30000) interval = 3000;
+
+            bool shouldBeep = (elapsed % interval) < 200;
+            if (remaining <= 3000) shouldBeep = true;
+
+            if (shouldBeep && !isBombBeeping) {
+                isBombBeeping = true;
+                tone(PIN_BUZZER, 1500);
+                for (uint8_t i = 0; i < 4; i++)
+                    if ((Team)(i + 1) != myRow().team) digitalWrite(PIN_LEDS[i], HIGH);
+            } else if (!shouldBeep && isBombBeeping) {
+                isBombBeeping = false;
+                noTone(PIN_BUZZER);
+                refreshLEDs();
+            }
+        }
+    }
+
+    // Cooldown terminat
+    if (selectedMode == 1 && myRow().status == BOMB_COOLDOWN && !isGamePaused) {
+        if (now - myRow().actionTime >= cooldownMs) {
+            myRow().status = BOMB_IDLE;
+            Serial.println("[BOMB] Cooldown terminat.");
+        }
+    }
+
+    // Respawn — iesire din coada + animatie flash
+    if (selectedMode == 2 && queueCount > 0 && !isGamePaused) {
+        if (now >= respawnQueue[queueHead]) {
+            queueCount--;
+            queueHead = (queueHead + 1) % 100;
+            flashStep = 1;
+            flashStepStart = now;
+            needsDisplayUpdate = true;
+            Serial.println("[RESPAWN] Jucator iesit din coada!");
+        }
+    }
+    if (selectedMode == 2 && flashStep > 0 && (now - flashStepStart >= 100)) {
+        flashStepStart = now;
+        if (flashStep % 2 == 1) {
+            for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], HIGH);
+            tone(PIN_BUZZER, 1500, 80);
+        } else {
+            for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], LOW);
+        }
+        flashStep++;
+        if (flashStep > 6) {
+            flashStep = 0;
+            refreshLEDs();
         }
     }
 
@@ -401,6 +519,16 @@ void loop() {
             }
             break;
 
+        case STATE_BOOM:
+            drawBoomScreen();
+            if (millis() - myRow().actionTime >= 3000) {
+                currentState = STATE_PAGES;
+                currentPage = 0;
+                needsDisplayUpdate = true;
+                refreshLEDs();
+            }
+            break;
+
         case STATE_ADMIN_MENU:
             if (needsDisplayUpdate) {
                 drawAdminMenu(adminMenuIndex, adminScrollIndex, selectedMode);
@@ -431,12 +559,14 @@ void loop() {
                 drawPowerOffScreen();
                 needsDisplayUpdate = false;
             }
+            // Dupa 2 secunde pulsam latch-ul (taie alimentarea daca intrerupatorul e ON)
             if (!powerOffPulsed && millis() - powerOffStart >= 2000) {
                 powerOffPulsed = true;
                 digitalWrite(PIN_LATCH, LOW);
                 latchLowStart = millis();
                 latchPulsing = true;
             }
+            // Daca pulsul s-a terminat si suntem inca aici, revenim in admin
             if (powerOffPulsed && !latchPulsing) {
                 powerOffPulsed = false;
                 currentState = STATE_ADMIN_MENU;
@@ -485,9 +615,9 @@ void loop() {
             break;
         }
 
-                    default:
-                        break;
-        }
+        default:
+            break;
+    }
 }
 
 // ============================================================
@@ -543,8 +673,44 @@ void onShortPress(uint8_t btnIndex) {
                 needsDisplayUpdate = true;
             }
             // pag 3 (kill reset) / pag 6 (start/pause/time reset) -> pasii urmatori
+        } else if (btnIndex == 3) {     // GALBEN
+            if (selectedMode == 2 && currentPage != 5) {
+                // RESPAWN — inrolare jucator in coada (un kill / respawn)
+                Team t = myRow().team;
+                if (t != TEAM_NEUTRAL) {
+                    uint8_t ti = t - 1;
+                    if (isGamePaused) { tone(PIN_BUZZER, 200, 200); return; }
+                    bool limitReached = (teamMaxRespawns[ti] > 0 && teamKillTotal(ti) >= teamMaxRespawns[ti]);
+                    if (!isTimeOut && !limitReached && queueCount < 100 &&
+                        !(gameTimeLeftSeconds > 0 && !isGameTimerRunning)) {
+                        respawnQueue[queueTail] = millis() + respawnTimeMs;
+                        queueTail = (queueTail + 1) % 100;
+                        queueCount++;
+                        myRow().kills[ti]++;
+                        int32_t penalty = min((int32_t)respawnPenaltyPoints,
+                                              teamScore(ti) - appliedPenalties[ti]);
+                        if (penalty > 0) appliedPenalties[ti] += penalty;
+                        needsDisplayUpdate = true;
+                        Serial.print("[RESPAWN] Kill inregistrat. Queue: ");
+                        Serial.println(queueCount);
+                        if (teamMaxRespawns[ti] > 0 && teamKillTotal(ti) >= teamMaxRespawns[ti]) {
+                            digitalWrite(PIN_RELAY, LOW);
+                            isRelayActive = true;
+                            relayTurnOffTime = millis() + 3000;
+                            tone(PIN_BUZZER, 1800, 600);
+                            Serial.println("[RESPAWN] LIMIT REACHED!");
+                        } else {
+                            tone(PIN_BUZZER, 1200, 100);
+                        }
+                    } else if (gameTimeLeftSeconds > 0 && !isGameTimerRunning) {
+                        tone(PIN_BUZZER, 200, 200);
+                    } else if (limitReached) {
+                        tone(PIN_BUZZER, 200, 300);
+                    }
+                }
+            }
+            // (start/pause pe pagina 6 -> pasii urmatori)
         }
-        // GALBEN (start/pause/respawn kill) -> pasii urmatori
     }
 
     else if (currentState == STATE_ADMIN_MENU) {
@@ -576,7 +742,11 @@ void onShortPress(uint8_t btnIndex) {
             } else if (adminMenuIndex == 5) {
                 // CHANGE MODE
                 selectedMode = -1;
-                myRow() = UnitRow{};       // reset complet randul propriu
+                // Pastram punctele si kill-urile; resetam doar starea de mod
+                myRow().mode       = 0;
+                myRow().status     = 0;
+                myRow().team       = TEAM_NEUTRAL;
+                myRow().actionTime = 0;
                 liveCapturePoints = 0;
                 lastPointTick = 0;
                 queueCount = queueHead = queueTail = 0;
@@ -742,8 +912,22 @@ void onLongPress(uint8_t btnIndex) {
         needsDisplayUpdate = true;
         tone(PIN_BUZZER, 1000, 100);
         Serial.println(currentAction == ACT_CAPTURE ? "[SECTOR] Start CAPTURE" : "[SECTOR] Start NEUTRALIZE");
+
+    } else if (selectedMode == 1) {  // BOMB
+        if (myRow().status == BOMB_COOLDOWN) { tone(PIN_BUZZER, 200, 200); return; }
+        if (myRow().status == BOMB_IDLE) {
+            currentAction = ACT_ARM;
+        } else {  // BOMB_ARMED
+            if (btnTeam == myRow().team) { tone(PIN_BUZZER, 200, 200); return; }  // cine a plantat nu poate dezamorsa
+            currentAction = ACT_DEFUSE;
+        }
+        actingTeam = btnIndex;
+        actionStartTime = millis();
+        currentState = STATE_ACTION;
+        needsDisplayUpdate = true;
+        tone(PIN_BUZZER, 1000, 100);
+        Serial.println(currentAction == ACT_ARM ? "[BOMB] Start ARM" : "[BOMB] Start DEFUSE");
     }
-    // BOMB (arm/defuse) -> pasul urmator
 }
 
 void onAdminCombo() {
