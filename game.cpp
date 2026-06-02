@@ -28,6 +28,7 @@ uint32_t respawnQueue[100]    = {0};
 
 // Flux joc
 uint32_t     gameTimeLeftSeconds = 0;
+uint32_t     gameTimeLimitSeconds = 0;
 bool         isGameTimerRunning  = false;
 bool         isTimeOut           = false;
 Team         conquestWinner      = TEAM_NEUTRAL;
@@ -35,6 +36,7 @@ WinCondition currentWinCondition = WIN_BY_POINTS;
 uint32_t     bonusIntervalMinutes= 30;
 uint32_t     actionTimeMs        = 15000;
 bool         isGamePaused        = false;
+uint32_t     gameOverTime        = 0;
 uint32_t     pauseStartTime      = 0;
 
 // Comunicatii
@@ -44,6 +46,21 @@ uint32_t lastSeenTime[MAX_UNITS]  = {0};
 // ============================================================
 // Scor prin INSUMARE peste tabel
 // ============================================================
+// Returneaza echipa care a cucerit TOATE sectoarele din tabel, sau TEAM_NEUTRAL
+Team checkConquest() {
+    Team owner = TEAM_NEUTRAL;
+    bool anySector = false;
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        if (unitTable[u].mode == 1) {            // unitate sector
+            anySector = true;
+            if (unitTable[u].status != SEC_CAPTURED) return TEAM_NEUTRAL;
+            if (owner == TEAM_NEUTRAL)      owner = unitTable[u].team;
+            else if (owner != unitTable[u].team) return TEAM_NEUTRAL;
+        }
+    }
+    return anySector ? owner : TEAM_NEUTRAL;
+}
+
 int32_t teamScore(uint8_t team) {
     int32_t total = 0;
     for (uint8_t u = 0; u < MAX_UNITS; u++) total += unitTable[u].savedPoints[team];
@@ -77,6 +94,7 @@ void buildContext(PageContext& ctx, uint8_t currentPage, uint8_t batteryPercent,
     ctx.gameTimeLeftSeconds= gameTimeLeftSeconds;
     ctx.isGamePaused       = isGamePaused;
     ctx.pauseStartTime     = pauseStartTime;
+    ctx.gameOverTime       = gameOverTime;
 
     // Sector (din randul propriu)
     ctx.sectorOwner          = (r.mode == 1 && r.status == SEC_CAPTURED) ? r.team : TEAM_NEUTRAL;

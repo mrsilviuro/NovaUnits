@@ -71,12 +71,37 @@ bool       isBombBeeping    = false;
 uint8_t    flashStep        = 0;
 uint32_t   flashStepStart   = 0;
 
+// --- Timer / pauza joc ---
+uint32_t   lastTimerTick      = 0;
+uint8_t    pendingAdminAction = 0;   // 0=start, 1=pause, 2=resume, 3=reset ceas
+uint32_t   waitAdminTagStart  = 0;
+uint32_t   rfidIgnoreUntil    = 0;   // ignoram RFID dupa o confirmare (sa scoatem cardul)
+
+// --- Auto-dim / auto-return ---
+uint32_t   lastActivityTime   = 0;
+bool       isDimmed           = false;
+
+// --- Kill reset ---
+uint32_t   killResetAdminStart = 0;
+uint8_t    killResetWinnerTeam = 255;
+uint16_t   killResetPoints     = 0;
+bool       killResetHasPoints  = false;
+uint32_t   killResetDoneStart  = 0;
+
 // (selectedMode si starea de joc sunt in game.cpp — modelul/tabelul)
 
 // ============================================================
 // refreshLEDs()
 // Aprinde LED-ul echipei proprietare + orice buton tinut fizic.
 // ============================================================
+void resetActivity() {
+    lastActivityTime = millis();
+    if (isDimmed) {
+        isDimmed = false;
+        setBrightness(175);   // luminozitate normala
+    }
+}
+
 void refreshLEDs() {
     for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], LOW);
 
@@ -146,7 +171,7 @@ void syncAdminIndices() {
     const uint32_t tl[] = {0, 900, 1800, 3600, 7200, 10800, 14400, 18000,
                            21600, 25200, 28800, 32400, 36000, 39600, 43200, 86400};
     for (uint8_t i = 0; i < 16; i++)
-        if (tl[i] == gameTimeLeftSeconds) { gsTimeLimit = i; break; }
+        if (tl[i] == gameTimeLimitSeconds) { gsTimeLimit = i; break; }
 
     const uint16_t bn[] = {0, 15, 30, 60, 120, 180, 240};
     for (uint8_t i = 0; i < 7; i++)
@@ -269,6 +294,47 @@ void handleActionProgress() {
 }
 
 // ============================================================
+// applyGamePause() / applyGameResume()
+// ============================================================
+void applyGamePause() {
+    isGamePaused = true;
+    pauseStartTime = millis();
+    tone(PIN_BUZZER, 500, 300);
+    needsDisplayUpdate = true;
+    Serial.println("[GAME] PAUSED!");
+}
+
+void applyGameResume() {
+    uint32_t pauseDuration = millis() - pauseStartTime;
+    isGamePaused = false;
+    // Ajustam toti timpii absoluti cu durata pauzei (ca sa nu "sara" timpul)
+    if (isGameTimerRunning)      lastTimerTick += pauseDuration;
+    if (myRow().actionTime > 0)  myRow().actionTime += pauseDuration;
+    if (lastPointTick > 0)       lastPointTick += pauseDuration;
+    for (uint8_t i = 0; i < queueCount; i++) {
+        uint8_t idx = (queueHead + i) % 100;
+        respawnQueue[idx] += pauseDuration;
+    }
+    tone(PIN_BUZZER, 800, 300);
+    needsDisplayUpdate = true;
+    Serial.println("[GAME] RESUMED!");
+}
+
+// ============================================================
+// applyKillsReset() — reset kill-uri pe tot tabelul + coada
+// ============================================================
+void applyKillsReset() {
+    for (uint8_t u = 0; u < MAX_UNITS; u++)
+        for (uint8_t t = 0; t < 4; t++)
+            unitTable[u].kills[t] = 0;
+    queueCount = 0;
+    queueHead = 0;
+    queueTail = 0;
+    needsDisplayUpdate = true;
+    Serial.println("[KILLS] Reset kill-uri si coada respawn!");
+}
+
+// ============================================================
 // setup()
 // ============================================================
 void setup() {
@@ -320,6 +386,16 @@ void loop() {
         updateBattery();
     }
 
+    // Auto-dim la 10% + auto-return la pagina 1 (dupa 30s inactivitate)
+    if (!isDimmed && (now - lastActivityTime >= 30000)) {
+        isDimmed = true;
+        setBrightness(10);
+        if (currentState == STATE_PAGES && currentPage > 0) {
+            currentPage = 0;
+            needsDisplayUpdate = true;
+        }
+    }
+
     // Power latch pulse non-blocking (power-off)
     if (latchPulsing && millis() - latchLowStart >= 100) {
         latchPulsing = false;
@@ -328,7 +404,7 @@ void loop() {
 
     // Citire RFID — card Admin (cardurile de puncte in joc vin la Faza 2)
     if ((currentState == STATE_PAGES || currentState == STATE_MENU || currentState == STATE_RESPAWN_SETUP)
-            && (millis() - lastRfidRead >= 100)) {
+            && (millis() - lastRfidRead >= 100) && millis() >= rfidIgnoreUntil) {
         RfidReadData rfid = rfidReadTag();
         if (rfid.result == RFID_READ_ADMIN) {
             tone(PIN_BUZZER, 2000, 200);
@@ -337,13 +413,56 @@ void loop() {
             adminScrollIndex = 0;
             currentState = STATE_ADMIN_MENU;
             needsDisplayUpdate = true;
+            rfidIgnoreUntil = millis() + 2000;
+            resetActivity();
             Serial.println("[RFID] Admin tag detectat!");
         }
         lastRfidRead = millis();
     }
 
-    // Sector — puncte LIVE (3 + bonus la fiecare 10s cat timp e cucerit)
-    if (selectedMode == 0 && myRow().status == SEC_CAPTURED && lastPointTick == 0)
+    // Timer joc + timeout
+    if (isGameTimerRunning && !isGamePaused && (now - lastTimerTick > 2000))
+        lastTimerTick = now - 1000;   // clamp anti-drain (tick invechit)
+        if (isGameTimerRunning && !isGamePaused && !isTimeOut && gameTimeLeftSeconds > 0 &&
+            currentWinCondition != WIN_BY_CONQUEST) {
+            if (now - lastTimerTick >= 1000) {
+                lastTimerTick += 1000;
+                gameTimeLeftSeconds--;
+                if (gameTimeLeftSeconds == 0) {
+                    isGameTimerRunning = false;
+                    isTimeOut = true;
+                    gameOverTime = now;
+                    digitalWrite(PIN_RELAY, LOW);
+                    isRelayActive = true;
+                    relayTurnOffTime = now + 20000;
+                    currentPage = 0;
+                    needsDisplayUpdate = true;
+                    Serial.println("[GAME] TIME OUT!");
+                }
+            }
+        }
+
+        // Conquest — o echipa a cucerit TOATE sectoarele -> game over
+        if (isGameTimerRunning && !isTimeOut && !isGamePaused &&
+            (currentWinCondition == WIN_BY_CONQUEST || currentWinCondition == WIN_BY_ANY)) {
+        Team w = checkConquest();
+        if (w != TEAM_NEUTRAL) {
+            conquestWinner = w;
+            isTimeOut = true;
+            isGameTimerRunning = false;
+            gameOverTime = now;
+            digitalWrite(PIN_RELAY, LOW);
+            isRelayActive = true;
+            relayTurnOffTime = now + 20000;
+            currentPage = 0;
+            needsDisplayUpdate = true;
+            Serial.print("[GAME] CONQUEST WINNER: ");
+            Serial.println(TEAM_NAMES[w - 1]);
+        }
+    }
+
+        // Sector — puncte LIVE (3 + bonus la fiecare 10s cat timp e cucerit)
+        if (selectedMode == 0 && myRow().status == SEC_CAPTURED && lastPointTick == 0)
         lastPointTick = now;
     if (!isTimeOut && !isGamePaused && selectedMode == 0 && myRow().status == SEC_CAPTURED) {
         if (now - lastPointTick >= 10000) {
@@ -356,7 +475,7 @@ void loop() {
     }
 
     // Timer bomba + beep accelerat + explozie
-    if (selectedMode == 1 && myRow().status == BOMB_ARMED && !isGamePaused) {
+    if (selectedMode == 1 && myRow().status == BOMB_ARMED && !isGamePaused && !isTimeOut) {
         uint32_t elapsed = now - myRow().actionTime;
         uint32_t remaining = (elapsed < bombTimerMs) ? (bombTimerMs - elapsed) : 0;
 
@@ -402,7 +521,7 @@ void loop() {
     }
 
     // Cooldown terminat
-    if (selectedMode == 1 && myRow().status == BOMB_COOLDOWN && !isGamePaused) {
+    if (selectedMode == 1 && myRow().status == BOMB_COOLDOWN && !isGamePaused && !isTimeOut) {
         if (now - myRow().actionTime >= cooldownMs) {
             myRow().status = BOMB_IDLE;
             Serial.println("[BOMB] Cooldown terminat.");
@@ -410,7 +529,7 @@ void loop() {
     }
 
     // Respawn — iesire din coada + animatie flash
-    if (selectedMode == 2 && queueCount > 0 && !isGamePaused) {
+    if (selectedMode == 2 && queueCount > 0 && !isGamePaused && !isTimeOut) {
         if (now >= respawnQueue[queueHead]) {
             queueCount--;
             queueHead = (queueHead + 1) % 100;
@@ -529,6 +648,114 @@ void loop() {
             }
             break;
 
+        case STATE_WAIT_ADMIN_TAG: {
+            if (needsDisplayUpdate) {
+                drawWaitAdminTag();
+                needsDisplayUpdate = false;
+            }
+            // Timeout 3 secunde fara card -> revenim pe pagina 6 + eroare
+            if (millis() - waitAdminTagStart >= 3000) {
+                currentState = STATE_PAGES;
+                currentPage = 5;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 200, 300);
+                break;
+            }
+            // Citim cardul admin pentru confirmare
+            if (millis() - lastRfidRead >= 100) {
+                RfidReadData rfid = rfidReadTag();
+                lastRfidRead = millis();
+                if (rfid.result == RFID_READ_ADMIN) {
+                    if (pendingAdminAction == 0) {            // START
+                        isGameTimerRunning = true;
+                        lastTimerTick = millis();
+                        Serial.println("[GAME] START!");
+                    } else if (pendingAdminAction == 1) {    // PAUSE
+                        applyGamePause();
+                    } else if (pendingAdminAction == 2) {    // RESUME
+                        applyGameResume();
+                    } else if (pendingAdminAction == 3) {    // RESET CEAS
+                        gameTimeLeftSeconds = gameTimeLimitSeconds;
+                        isGameTimerRunning = false;
+                        isTimeOut = false;
+                        lastTimerTick = millis();
+                        Serial.println("[GAME] Ceas resetat la timpul initial!");
+                    }
+                    rfidIgnoreUntil = millis() + 2000;
+                    currentState = STATE_PAGES;
+                    currentPage = 5;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1500, 200);
+                } else if (rfid.result == RFID_READ_POINTS || rfid.result == RFID_READ_INVALID) {
+                    tone(PIN_BUZZER, 200, 300);   // card gresit
+                }
+            }
+            break;
+        }
+
+        case STATE_KILL_RESET_ADMIN: {
+            if (needsDisplayUpdate) {
+                drawKillResetAdminScreen();
+                needsDisplayUpdate = false;
+            }
+            if (millis() - killResetAdminStart >= 3000) {
+                currentState = STATE_PAGES;
+                currentPage = 2;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 200, 300);
+                break;
+            }
+            if (millis() - lastRfidRead >= 100) {
+                RfidReadData rfid = rfidReadTag();
+                lastRfidRead = millis();
+                if (rfid.result == RFID_READ_ADMIN) {
+                    tone(PIN_BUZZER, 1500, 200);
+                    rfidIgnoreUntil = millis() + 2000;
+                    uint8_t teamsWithLimit = 0;
+                    for (uint8_t i = 0; i < 4; i++)
+                        if (teamMaxRespawns[i] > 0) teamsWithLimit++;
+                        if (teamsWithLimit >= 2) {
+                            currentState = STATE_KILL_RESET_CONFIRM;   // intrebam DA/NU
+                        } else {
+                            applyKillsReset();                          // reset direct
+                            currentPage = 2;
+                            killResetHasPoints = false;
+                            killResetDoneStart = millis();
+                            currentState = STATE_KILL_RESET_DONE;
+                        }
+                        needsDisplayUpdate = true;
+                }
+            }
+            break;
+        }
+
+        case STATE_KILL_RESET_CONFIRM:
+            if (needsDisplayUpdate) {
+                drawKillResetConfirmScreen();
+                needsDisplayUpdate = false;
+            }
+            handleButtons();
+            break;
+
+        case STATE_KILL_RESET_WINNER:
+            if (needsDisplayUpdate) {
+                drawKillResetWinnerScreen();
+                needsDisplayUpdate = false;
+                for (uint8_t i = 0; i < 4; i++)
+                    digitalWrite(PIN_LEDS[i], teamMaxRespawns[i] > 0 ? HIGH : LOW);
+            }
+            handleButtons();
+            break;
+
+        case STATE_KILL_RESET_DONE:
+            drawKillResetDoneScreen(killResetPoints, killResetWinnerTeam, killResetHasPoints);
+            if (millis() - killResetDoneStart >= 2000) {
+                refreshLEDs();
+                currentState = STATE_PAGES;
+                needsDisplayUpdate = true;
+            }
+            break;
+
         case STATE_ADMIN_MENU:
             if (needsDisplayUpdate) {
                 drawAdminMenu(adminMenuIndex, adminScrollIndex, selectedMode);
@@ -626,6 +853,7 @@ void loop() {
 
 void onShortPress(uint8_t btnIndex) {
     tone(PIN_BUZZER, 800, 30);
+    resetActivity();
 
     if (currentState == STATE_MENU) {
         if (btnIndex == 2) {            // VERDE — scroll
@@ -665,14 +893,27 @@ void onShortPress(uint8_t btnIndex) {
             currentPage = (currentPage >= 5) ? 0 : currentPage + 1;
             needsDisplayUpdate = true;
         } else if (btnIndex == 2) {     // VERDE — scroll pe paginile 4 si 5
-            if (currentPage == 3) {
+            if (currentPage == 2 && !isTimeOut) {
+                // PAGE 3 — VERDE: reset kill-uri
+                killResetAdminStart = millis();
+                currentState = STATE_KILL_RESET_ADMIN;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 1000, 100);
+            } else if (currentPage == 3) {
                 page4ScrollIndex++;
                 needsDisplayUpdate = true;
             } else if (currentPage == 4) {
                 page5ScrollIndex++;
                 needsDisplayUpdate = true;
+            } else if (currentPage == 5 && gameTimeLimitSeconds > 0 && !isTimeOut) {
+                // PAGE 6 — VERDE: reset ceas
+                pendingAdminAction = 3;
+                waitAdminTagStart = millis();
+                currentState = STATE_WAIT_ADMIN_TAG;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 1000, 100);
             }
-            // pag 3 (kill reset) / pag 6 (start/pause/time reset) -> pasii urmatori
+            // pag 3 (kill reset) -> pasii urmatori
         } else if (btnIndex == 3) {     // GALBEN
             if (selectedMode == 2 && currentPage != 5) {
                 // RESPAWN — inrolare jucator in coada (un kill / respawn)
@@ -682,7 +923,7 @@ void onShortPress(uint8_t btnIndex) {
                     if (isGamePaused) { tone(PIN_BUZZER, 200, 200); return; }
                     bool limitReached = (teamMaxRespawns[ti] > 0 && teamKillTotal(ti) >= teamMaxRespawns[ti]);
                     if (!isTimeOut && !limitReached && queueCount < 100 &&
-                        !(gameTimeLeftSeconds > 0 && !isGameTimerRunning)) {
+                        isGameTimerRunning) {
                         respawnQueue[queueTail] = millis() + respawnTimeMs;
                         queueTail = (queueTail + 1) % 100;
                         queueCount++;
@@ -702,14 +943,69 @@ void onShortPress(uint8_t btnIndex) {
                         } else {
                             tone(PIN_BUZZER, 1200, 100);
                         }
-                    } else if (gameTimeLeftSeconds > 0 && !isGameTimerRunning) {
-                        tone(PIN_BUZZER, 200, 200);
+                        } else if (!isGameTimerRunning) {
+                            tone(PIN_BUZZER, 200, 200);
                     } else if (limitReached) {
                         tone(PIN_BUZZER, 200, 300);
                     }
                 }
+            } else if (currentPage == 5 && !isTimeOut) {
+                // PAGE 6 — START / PAUSE / RESUME (confirmare prin admin tag 3s)
+                bool act = true;
+                if (isGamePaused) {
+                    pendingAdminAction = 2;        // resume
+                } else if (selectedMode != -1 && !isGameTimerRunning) {
+                    pendingAdminAction = 0;        // start
+                } else if (selectedMode != -1 && isGameTimerRunning) {
+                    pendingAdminAction = 1;        // pause
+                } else {
+                    act = false;
+                }
+                if (act) {
+                    waitAdminTagStart = millis();
+                    currentState = STATE_WAIT_ADMIN_TAG;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1000, 100);
+                }
             }
-            // (start/pause pe pagina 6 -> pasii urmatori)
+        }
+    }
+
+    else if (currentState == STATE_KILL_RESET_CONFIRM) {
+        if (btnIndex == 0) {            // RED — Nu, reset fara puncte
+            applyKillsReset();
+            currentPage = 2;
+            killResetHasPoints = false;
+            killResetDoneStart = millis();
+            currentState = STATE_KILL_RESET_DONE;
+            tone(PIN_BUZZER, 1500, 300);
+            needsDisplayUpdate = true;
+        } else if (btnIndex == 1) {     // BLUE — Da, selectam castigatorul
+            currentState = STATE_KILL_RESET_WINNER;
+            needsDisplayUpdate = true;
+        }
+    }
+
+    else if (currentState == STATE_KILL_RESET_WINNER) {
+        // Doar echipele cu limita de kill-uri pot fi selectate
+        if (btnIndex < 4 && teamMaxRespawns[btnIndex] > 0) {
+            killResetWinnerTeam = btnIndex;
+            uint16_t pts = 0;
+            if (teamKillTotal(btnIndex) < teamMaxRespawns[btnIndex])
+                pts = (teamMaxRespawns[btnIndex] - teamKillTotal(btnIndex)) * 10;
+            killResetPoints = pts;
+            killResetHasPoints = true;
+            if (pts > 0) myRow().savedPoints[btnIndex] += (int32_t)pts;
+            applyKillsReset();
+            currentPage = 2;
+            killResetDoneStart = millis();
+            currentState = STATE_KILL_RESET_DONE;
+            needsDisplayUpdate = true;
+            tone(PIN_BUZZER, 1500, 300);
+            Serial.print("[KILLS] Winner: ");
+            Serial.print(TEAM_NAMES[btnIndex]);
+            Serial.print(" +");
+            Serial.println(pts);
         }
     }
 
@@ -811,7 +1107,10 @@ void onShortPress(uint8_t btnIndex) {
                     const uint32_t tl[] = {0, 900, 1800, 3600, 7200, 10800, 14400, 18000, 21600, 25200, 28800, 32400, 36000, 39600, 43200, 86400};
                     const uint16_t bn[] = {0, 15, 30, 60, 120, 180, 240};
                     const uint32_t at[] = {5000, 10000, 15000, 20000};
-                    gameTimeLeftSeconds  = tl[gsTimeLimit];
+                    gameTimeLimitSeconds = tl[gsTimeLimit];
+                    // Aplicam la ceasul live doar daca jocul nu e in desfasurare
+                    if (!isGameTimerRunning && !isGamePaused && !isTimeOut)
+                        gameTimeLeftSeconds = gameTimeLimitSeconds;
                     bonusIntervalMinutes = bn[gsBonus];
                     currentWinCondition  = (WinCondition)gsWinCond;
                     actionTimeMs         = at[gsActionIdx];
@@ -890,10 +1189,11 @@ void onShortPress(uint8_t btnIndex) {
 }
 
 void onLongPress(uint8_t btnIndex) {
+    resetActivity();
     // Actiunile sunt permise doar pe pagina 1, in STATE_PAGES
     if (currentState != STATE_PAGES || isTimeOut) return;
     if (isGamePaused) { tone(PIN_BUZZER, 200, 200); return; }
-    if (gameTimeLeftSeconds > 0 && !isGameTimerRunning) { tone(PIN_BUZZER, 200, 200); return; }
+    if (!isGameTimerRunning) { tone(PIN_BUZZER, 200, 200); return; }
 
     Team btnTeam = (Team)(btnIndex + 1);
 
@@ -931,6 +1231,7 @@ void onLongPress(uint8_t btnIndex) {
 }
 
 void onAdminCombo() {
+    resetActivity();
     tone(PIN_BUZZER, 2000, 500);
     previousStateBeforeAdmin = currentState;
     adminMenuIndex = 0;

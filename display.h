@@ -30,6 +30,7 @@ struct PageContext {
     int32_t appliedPenalties[4];
     bool    isGamePaused;
     uint32_t pauseStartTime;
+    uint32_t gameOverTime;
     // Sector
     Team    sectorOwner;
     uint32_t captureStartTime;
@@ -135,5 +136,12 @@ void drawTagWriter(uint8_t statusMsg);
 // Ecrane gameplay
 void drawActionScreen(ActionType actionType, uint8_t teamIndex, uint32_t elapsed, uint32_t totalMs);
 void drawSuccessScreen();
-
 void drawBoomScreen();
+void drawWaitAdminTag();
+void setBrightness(uint8_t level);
+
+// Ecrane Kill Reset
+void drawKillResetAdminScreen();
+void drawKillResetConfirmScreen();
+void drawKillResetWinnerScreen();
+void drawKillResetDoneScreen(uint16_t points, uint8_t teamIndex, bool hasPoints);

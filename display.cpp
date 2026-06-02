@@ -355,20 +355,31 @@ void drawPages(const PageContext& ctx) {
             // --- GAME OVER ---
             if (ctx.isTimeOut) {
                 if (ctx.conquestWinner != TEAM_NEUTRAL) {
-                    display.setTextSize(2);
-                    const char* t1 = TEAM_NAMES[ctx.conquestWinner - 1];
-                    uint8_t x = (SCREEN_WIDTH - (strlen(t1) * 12)) / 2;
-                    display.setCursor(x, 15);
-                    display.print(t1);
-                    const char* t2 = "WINS!";
-                    x = (SCREEN_WIDTH - (strlen(t2) * 12)) / 2;
-                    display.setCursor(x, 33);
-                    display.print(t2);
+                    // 1. Afișăm "Wins By Conquest" sus (Text mic, Size 1)
                     display.setTextSize(1);
-                    const char* t3 = "by Conquest";
+                    const char* t1 = "And the WINNER is";
+                    uint8_t x = (SCREEN_WIDTH - (strlen(t1) * 6)) / 2;
+                    display.setCursor(x, 14); // Y = 10 (mai sus pe ecran)
+                    display.print(t1);
+
+                    // 2. Afișăm Numele Echipei sub primul text (Text mare, Size 2)
+                    display.setTextSize(2);
+                    const char* t2 = TEAM_NAMES[ctx.conquestWinner - 1];
+                    x = (SCREEN_WIDTH - (strlen(t2) * 12)) / 2;
+                    display.setCursor(x, 25); // Y = 24 (imediat sub "Wins By Conquest")
+                    display.print(t2);
+
+                    // 3. Afișăm restul textului (Text mic, Size 1)
+                    display.setTextSize(1);
+                    const char* t3 = "Press BLUE to";
                     x = (SCREEN_WIDTH - (strlen(t3) * 6)) / 2;
-                    display.setCursor(x, 52);
+                    display.setCursor(x, 44);
                     display.print(t3);
+
+                    const char* t4 = "check the score ...";
+                    x = (SCREEN_WIDTH - (strlen(t4) * 6)) / 2;
+                    display.setCursor(x, 54);
+                    display.print(t4);
                 } else {
                     display.setTextSize(2);
                     const char* t1 = "TIME OUT";
@@ -723,7 +734,8 @@ void drawPages(const PageContext& ctx) {
                 char timeStr[15] = "";
                 bool hasTime = false;
                 if (ctx.globalEventTime[i] > 0) {
-                    uint32_t el = (now - ctx.globalEventTime[i]) / 1000;
+                    uint32_t refNow = ctx.isGamePaused ? ctx.pauseStartTime : (ctx.isTimeOut ? ctx.gameOverTime : now);
+                    uint32_t el = (refNow > ctx.globalEventTime[i]) ? (refNow - ctx.globalEventTime[i]) / 1000 : 0;
                     uint32_t tgt = 0;
                     bool active = true;
                     if (m == 1 && t != TEAM_NEUTRAL) {
@@ -886,24 +898,20 @@ void drawPages(const PageContext& ctx) {
                 strcpy(line4, "** PAUSED **");
             } else if (ctx.isTimeOut) {
                 strcpy(line4, "GAME OVER!");
-            } else if (ctx.winCondition == WIN_BY_CONQUEST) {
+            } else if (!ctx.isGameTimerRunning) {
+                strcpy(line4, "YELLOW to START");
+            } else if (ctx.winCondition == WIN_BY_CONQUEST || ctx.gameTimeLeftSeconds == 0) {
                 strcpy(line4, "No time limit!");
             } else {
-                if (!ctx.isGameTimerRunning && ctx.gameTimeLeftSeconds == 0) {
-                    strcpy(line4, "No time limit!");
-                } else if (!ctx.isGameTimerRunning && ctx.gameTimeLeftSeconds > 0) {
-                    strcpy(line4, "YELLOW to START");
-                } else {
-                    uint8_t h = ctx.gameTimeLeftSeconds / 3600;
-                    uint8_t m = (ctx.gameTimeLeftSeconds % 3600) / 60;
-                    uint8_t s = ctx.gameTimeLeftSeconds % 60;
-                    if (h > 0)
-                        snprintf(line4, sizeof(line4), "%uh %02umin %02usec", h, m, s);
-                    else if (m > 0)
-                        snprintf(line4, sizeof(line4), "%umin %02usec", m, s);
-                    else
-                        snprintf(line4, sizeof(line4), "%usec", s);
-                }
+                uint8_t h = ctx.gameTimeLeftSeconds / 3600;
+                uint8_t m = (ctx.gameTimeLeftSeconds % 3600) / 60;
+                uint8_t s = ctx.gameTimeLeftSeconds % 60;
+                if (h > 0)
+                    snprintf(line4, sizeof(line4), "%uh %02umin %02usec", h, m, s);
+                else if (m > 0)
+                    snprintf(line4, sizeof(line4), "%umin %02usec", m, s);
+                else
+                    snprintf(line4, sizeof(line4), "%usec", s);
             }
 
             // Construim hint-ul
@@ -911,9 +919,9 @@ void drawPages(const PageContext& ctx) {
             if (!ctx.isTimeOut) {
                 if (ctx.isGamePaused)
                     hint = "YELLOW to resume";
-                else if (ctx.gameTimeLeftSeconds > 0 && !ctx.isGameTimerRunning)
-                    hint = "";  // line4 deja arata "YELLOW to START"
-                    else if (ctx.selectedMode != -1)
+                else if (!ctx.isGameTimerRunning)
+                    hint = "";  // neinceput -> line4 arata "YELLOW to START"
+                    else
                         hint = "YELLOW to pause";
             }
 
@@ -1258,5 +1266,106 @@ void drawBoomScreen() {
     uint8_t x = (SCREEN_WIDTH - (strlen(msg) * 12)) / 2;
     display.setCursor(x, 24);
     display.print(msg);
+    display.display();
+}
+
+// ============================================================
+// drawWaitAdminTag() — confirmare actiune prin card admin
+// ============================================================
+void drawWaitAdminTag() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "Please present";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
+    display.setCursor(x, 24);
+    display.print(l1);
+    const char* l2 = "Admin tag ...";
+    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
+    display.setCursor(x, 36);
+    display.print(l2);
+    display.display();
+}
+
+// ============================================================
+// setBrightness() — contrast OLED (0-255)
+// ============================================================
+void setBrightness(uint8_t level) {
+    display.ssd1306_command(SSD1306_SETCONTRAST);
+    display.ssd1306_command(level);
+}
+
+// ============================================================
+// Ecrane KILL RESET
+// ============================================================
+void drawKillResetAdminScreen() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "Please present";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
+    display.setCursor(x, 20);
+    display.print(l1);
+    const char* l2 = "Admin tag ...";
+    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
+    display.setCursor(x, 32);
+    display.print(l2);
+    display.display();
+}
+
+void drawKillResetConfirmScreen() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "Do you want to";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
+    display.setCursor(x, 14);
+    display.print(l1);
+    const char* l2 = "offer points?";
+    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
+    display.setCursor(x, 26);
+    display.print(l2);
+    const char* l3 = "Red: No     Blue: Yes";
+    x = (SCREEN_WIDTH - (strlen(l3) * 6)) / 2;
+    display.setCursor(x, 50);
+    display.print(l3);
+    display.display();
+}
+
+void drawKillResetWinnerScreen() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "Select the";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
+    display.setCursor(x, 18);
+    display.print(l1);
+    const char* l2 = "WINNER!";
+    display.setTextSize(2);
+    x = (SCREEN_WIDTH - (strlen(l2) * 12)) / 2;
+    display.setCursor(x, 32);
+    display.print(l2);
+    display.display();
+}
+
+void drawKillResetDoneScreen(uint16_t points, uint8_t teamIndex, bool hasPoints) {
+    display.clearDisplay();
+    display.setTextSize(2);
+    const char* msg = "DONE";
+    uint8_t x = (SCREEN_WIDTH - (strlen(msg) * 12)) / 2;
+    display.setCursor(x, 24);
+    display.print(msg);
+    if (hasPoints && points > 0) {
+        display.setTextSize(1);
+        char buf[25];
+        snprintf(buf, sizeof(buf), "+%u", points);
+        uint8_t pw = strlen(buf) * 6;
+        uint8_t totalW = pw + 2 + 7;
+        uint8_t sx = (SCREEN_WIDTH - totalW) / 2;
+        display.setCursor(sx, 40);
+        display.print(buf);
+        display.drawBitmap(sx + pw + 2, 40, POINT_BMP, 7, 7, SSD1306_WHITE);
+        char team[20];
+        snprintf(team, sizeof(team), "for %s", TEAM_NAMES[teamIndex]);
+        x = (SCREEN_WIDTH - (strlen(team) * 6)) / 2;
+        display.setCursor(x, 52);
+        display.print(team);
+    }
     display.display();
 }

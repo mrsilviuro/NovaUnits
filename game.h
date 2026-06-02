@@ -24,6 +24,7 @@ struct UnitRow {
 
 extern UnitRow unitTable[MAX_UNITS];   // tabelul complet
 UnitRow& myRow();                      // randul unitatii curente = unitTable[UNIT_ID-1]
+Team checkConquest();
 
 // Acumulatorul de puncte LIVE al sectorului local (inca necomise in savedPoints)
 extern uint32_t liveCapturePoints;
@@ -54,6 +55,7 @@ extern uint32_t respawnQueue[100];
 
 // --- Flux joc ---
 extern uint32_t     gameTimeLeftSeconds;
+extern uint32_t     gameTimeLimitSeconds;
 extern bool         isGameTimerRunning;
 extern bool         isTimeOut;
 extern Team         conquestWinner;
@@ -62,6 +64,7 @@ extern uint32_t     bonusIntervalMinutes;
 extern uint32_t     actionTimeMs;
 extern bool         isGamePaused;
 extern uint32_t     pauseStartTime;
+extern uint32_t     gameOverTime;
 
 // --- Comunicatii (meta, nu fac parte din tabelul de joc) ---
 extern uint8_t  globalBattery[MAX_UNITS];
