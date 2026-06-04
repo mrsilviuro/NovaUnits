@@ -815,8 +815,8 @@ void drawPages(const PageContext& ctx) {
                         rows[i] = rows[j];
                         rows[j] = tmp;
                     }
-                    uint8_t scroll = ctx.page4ScrollIndex;
-                if (count > 0 && scroll > count - 1) scroll = 0;
+                    uint8_t maxScroll = (count > 4) ? (count - 4) : 0;
+                uint8_t scroll = (maxScroll == 0) ? 0 : (ctx.page4ScrollIndex % (maxScroll + 1));
                 if (count == 0) {
                     display.setCursor(10, 30);
                     display.print("No active units ...");
@@ -854,8 +854,8 @@ void drawPages(const PageContext& ctx) {
                 bool everSeen = (ctx.lastSeenTime[i] > 0) || (i == UNIT_ID - 1);
                 if (everSeen) activeUnits[count++] = i;
             }
-            uint8_t scroll = ctx.page5ScrollIndex;
-            if (count > 0 && scroll > count - 1) scroll = 0;
+            uint8_t maxScroll = (count > 4) ? (count - 4) : 0;
+            uint8_t scroll = (maxScroll == 0) ? 0 : (ctx.page5ScrollIndex % (maxScroll + 1));
             if (count == 0) {
                 display.setCursor(10, 30);
                 display.print("No active units ...");

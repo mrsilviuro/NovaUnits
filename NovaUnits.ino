@@ -850,14 +850,16 @@ void loop() {
             drawSyncingScreen();
             loraSendSyncBlocking();
             tone(PIN_BUZZER, 1500, 300);
+            for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], HIGH);   // toate LED-urile pe durata DONE
             syncDoneStart = millis();
-            currentState = STATE_SYNC_DONE;
+        currentState = STATE_SYNC_DONE;
             needsDisplayUpdate = true;
             break;
 
         case STATE_SYNC_DONE:
             if (needsDisplayUpdate) { drawSyncDoneScreen(); needsDisplayUpdate = false; }
             if (millis() - syncDoneStart >= 2000) {
+                refreshLEDs();                    // restauram starea corecta a LED-urilor
                 currentState = syncReturnState;   // mereu inapoi de unde am venit (admin)
                 needsDisplayUpdate = true;
             }
