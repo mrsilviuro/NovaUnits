@@ -145,3 +145,11 @@ void drawKillResetAdminScreen();
 void drawKillResetConfirmScreen();
 void drawKillResetWinnerScreen();
 void drawKillResetDoneScreen(uint16_t points, uint8_t teamIndex, bool hasPoints);
+
+void drawBonusScreen(uint16_t points, uint8_t teamIndex);
+
+// Ecrane Sync (LoRa)
+void drawSyncWarningScreen();
+void drawSyncingScreen();
+void drawSyncedScreen(uint8_t fromUnitId);
+void drawSyncDoneScreen();

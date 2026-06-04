@@ -1,0 +1,35 @@
+// ============================================================
+// lora.h — Strat transport LoRa (DX-LR03) + ceas comun
+// Faza 2. Acum: doar Sync Units (setari + LocalTime).
+// ============================================================
+#pragma once
+#include <Arduino.h>
+#include "config.h"
+
+// --- Ceas comun "localTime" (secunde) — ruleaza din boot ---
+extern uint32_t localTime;
+extern uint32_t lastLocalTick;
+extern bool     localTimePaused;
+
+// --- Stare retea ---
+// isSynced == false => OFFLINE: nu transmite nicio alerta si ignora
+// alertele de joc primite (dar asculta pachetele SYNC ca sa poata fi adusa online).
+extern bool     isSynced;
+extern uint8_t  syncedByUnit;   // ce unitate ne-a sincronizat ultima data
+
+// --- Indecsi setari (DEFINITI in .ino) — necesari pentru pachetul SYNC ---
+extern uint8_t gsWinCond, gsTimeLimit, gsBonus, gsActionIdx;
+extern uint8_t bsTimerIdx, bsCooldownIdx, bsExpPtsIdx, bsDefPtsIdx;
+extern uint8_t rsTimeIdx, rsPenaltyIdx;
+extern uint8_t rsLimitIdx[4];
+
+// Evenimente intoarse de loraPoll()
+enum LoraEvent : uint8_t { LORA_EVT_NONE = 0, LORA_EVT_SYNC = 1, LORA_EVT_RESTART = 2 };
+
+void loraInit();
+void loraTick();                                        // incrementeaza localTime la fiecare secunda
+void loraTxUpdate();                                    // pompeaza coada TX (non-blocant); apelata in loop()
+void loraSendSyncBlocking();                            // trimite pachetul SYNC (blocant; pauza/reia ceasul pe AUX)
+void loraSendRestart();                                 // pune in coada alerta RESTART (background, doar daca synced)
+void loraSendMode(uint8_t mode, uint8_t team);          // pune in coada alerta MODE (background)
+LoraEvent loraPoll();                                   // citeste UART; intoarce evenimentul primit (deja aplicat)

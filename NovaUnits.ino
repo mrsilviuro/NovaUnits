@@ -7,6 +7,7 @@
 #include "buttons.h"
 #include "game.h"
 #include "rfid.h"
+#include "lora.h"
 
 #include <esp_wifi.h>
 #include <esp_bt.h>
@@ -46,6 +47,7 @@ uint8_t   adminScrollIndex  = 0;
 uint8_t   adminSelectedPage = 0;
 uint32_t  adminSavedTime    = 0;
 GameState previousStateBeforeAdmin = STATE_MENU;
+GameState syncReturnState          = STATE_MENU;
 
 // Indecsi setari admin (UI)
 uint8_t gsIndex = 0, gsWinCond = 0, gsTimeLimit = 0, gsBonus = 2, gsActionIdx = 2;
@@ -87,6 +89,13 @@ uint8_t    killResetWinnerTeam = 255;
 uint16_t   killResetPoints     = 0;
 bool       killResetHasPoints  = false;
 uint32_t   killResetDoneStart  = 0;
+
+// --- Card puncte (bonus) ---
+uint16_t   bonusPoints         = 0;
+uint8_t    bonusTeam           = 0;
+uint32_t   bonusScreenStart    = 0;
+uint32_t   syncedScreenStart   = 0;
+uint32_t   syncDoneStart       = 0;
 
 // (selectedMode si starea de joc sunt in game.cpp — modelul/tabelul)
 
@@ -248,9 +257,7 @@ void handleActionProgress() {
             Serial.print("[SECTOR] Cucerit de: ");
             Serial.println(TEAM_NAMES[actingTeam]);
         } else if (currentAction == ACT_NEUTRALIZE) {
-            // comitem punctele live la totalul echipei care detinea sectorul
-            if (myRow().team != TEAM_NEUTRAL)
-                myRow().savedPoints[myRow().team - 1] += (int32_t)liveCapturePoints;
+            // punctele live au fost deja comise in timp real -> doar resetam
             myRow().status     = SEC_NEUTRAL;
             myRow().team       = TEAM_NEUTRAL;
             myRow().actionTime = now;
@@ -335,8 +342,23 @@ void applyKillsReset() {
 }
 
 // ============================================================
-// setup()
+// doReboot() — ecran REBOOTING + beep continuu + restart
 // ============================================================
+void doReboot() {
+    display.clearDisplay();
+    display.setTextSize(2);
+    uint8_t x = (SCREEN_WIDTH - (strlen("REBOOTING") * 12)) / 2;
+    display.setCursor(x, 24);
+    display.print("REBOOTING");
+    display.display();
+    tone(PIN_BUZZER, 2000);                          // beep continuu
+    for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], HIGH);   // feedback vizual
+    uint32_t t = millis();
+    while (millis() - t < 1500) { loraTxUpdate(); }  // pompam coada (iese RESTART) inainte de restart
+    noTone(PIN_BUZZER);
+    ESP.restart();
+}
+
 void setup() {
     // Oprim WiFi + Bluetooth (economie + stabilitate)
     esp_wifi_stop();
@@ -361,7 +383,7 @@ void setup() {
 
     buttonsInit();
     rfidInit();
-    // LoRa se adauga la Faza 2.
+    loraInit();
     displayInit();
 
     Serial.println("[BOOT] Setup complet.");
@@ -372,6 +394,24 @@ void setup() {
 // ============================================================
 void loop() {
     uint32_t now = millis();
+
+    // LoRa: ceas comun + coada TX (background) + receptie pachete
+    loraTick();
+    loraTxUpdate();
+    if (currentState != STATE_SYNCING && currentState != STATE_SYNC_WARNING &&
+        currentState != STATE_SYNCED && currentState != STATE_SYNC_DONE) {
+        LoraEvent ev = loraPoll();
+    if (ev == LORA_EVT_SYNC) {
+        syncReturnState = currentState;   // de unde am venit (revenire daca nu e mod)
+        syncedScreenStart = now;
+        currentState = STATE_SYNCED;
+        needsDisplayUpdate = true;
+        for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], HIGH);
+        tone(PIN_BUZZER, 1500, 600);
+    } else if (ev == LORA_EVT_RESTART) {
+        doReboot();
+    }
+        }
 
     // Refresh registre display — previne "drift"-ul de imagine
     if (now - lastDisplayRefresh >= 3000) {
@@ -402,7 +442,7 @@ void loop() {
         digitalWrite(PIN_LATCH, HIGH);
     }
 
-    // Citire RFID — card Admin (cardurile de puncte in joc vin la Faza 2)
+    // Citire RFID — card Admin + carduri de puncte
     if ((currentState == STATE_PAGES || currentState == STATE_MENU || currentState == STATE_RESPAWN_SETUP)
             && (millis() - lastRfidRead >= 100) && millis() >= rfidIgnoreUntil) {
         RfidReadData rfid = rfidReadTag();
@@ -416,6 +456,38 @@ void loop() {
             rfidIgnoreUntil = millis() + 2000;
             resetActivity();
             Serial.println("[RFID] Admin tag detectat!");
+        } else if (rfid.result == RFID_READ_POINTS && selectedMode != -1 && !isTimeOut && !isGamePaused) {
+            // Echipa proprietara = exact echipa al carei LED e aprins
+            Team owner = TEAM_NEUTRAL;
+            if (selectedMode == 0 && myRow().status == SEC_CAPTURED) owner = myRow().team;
+            else if (selectedMode == 1 && myRow().status == BOMB_ARMED) owner = myRow().team;
+            else if (selectedMode == 2) owner = myRow().team;
+
+            if (owner == TEAM_NEUTRAL) {
+                // Unitatea nu apartine niciunei echipe -> nu ardem cardul
+                tone(PIN_BUZZER, 300, 400);
+                rfidIgnoreUntil = millis() + 1500;
+                Serial.println("[RFID] Unitate fara proprietar. Card intact.");
+            } else if (rfidBurnTag()) {
+                // Cardul s-a ars cu succes -> acordam punctele echipei
+                myRow().savedPoints[owner - 1] += (int32_t)rfid.points;
+                bonusPoints = rfid.points;
+                bonusTeam = owner;
+                bonusScreenStart = millis();
+                currentState = STATE_BONUS_SCREEN;
+                needsDisplayUpdate = true;
+                rfidIgnoreUntil = millis() + 2000;
+                tone(PIN_BUZZER, 1200, 200);
+                Serial.print("[RFID] +");
+                Serial.print(rfid.points);
+                Serial.print(" pts -> ");
+                Serial.println(TEAM_NAMES[owner - 1]);
+                // Faza 2 (LoRa): trimitem alerta ca alte unitati sa-si actualizeze tabelul
+            } else {
+                // Ardere esuata -> NU acordam puncte
+                tone(PIN_BUZZER, 200, 300);
+                Serial.println("[RFID] EROARE la ardere! Punctele NU se acorda.");
+            }
         }
         lastRfidRead = millis();
     }
@@ -469,8 +541,11 @@ void loop() {
             uint32_t minutesHeld = (now - myRow().actionTime) / 60000;
             uint32_t bonus = (bonusIntervalMinutes > 0) ? (minutesHeld / bonusIntervalMinutes) : 0;
             if (bonus > 3) bonus = 3;
-            liveCapturePoints += (3 + bonus);
-            lastPointTick += 10000;
+            int32_t gain = 3 + bonus;
+            liveCapturePoints += gain;                          // contor afisaj pagina 1
+            if (myRow().team != TEAM_NEUTRAL)
+                myRow().savedPoints[myRow().team - 1] += gain;  // comitem in timp real
+                lastPointTick += 10000;
         }
     }
 
@@ -756,6 +831,47 @@ void loop() {
             }
             break;
 
+        case STATE_BONUS_SCREEN:
+            drawBonusScreen(bonusPoints, bonusTeam);
+            if (millis() - bonusScreenStart >= 2000) {
+                refreshLEDs();
+                currentState = STATE_PAGES;
+                currentPage = 0;
+                needsDisplayUpdate = true;
+            }
+            break;
+
+        case STATE_SYNC_WARNING:
+            if (needsDisplayUpdate) { drawSyncWarningScreen(); needsDisplayUpdate = false; }
+            handleButtons();
+            break;
+
+        case STATE_SYNCING:
+            drawSyncingScreen();
+            loraSendSyncBlocking();
+            tone(PIN_BUZZER, 1500, 300);
+            syncDoneStart = millis();
+            currentState = STATE_SYNC_DONE;
+            needsDisplayUpdate = true;
+            break;
+
+        case STATE_SYNC_DONE:
+            if (needsDisplayUpdate) { drawSyncDoneScreen(); needsDisplayUpdate = false; }
+            if (millis() - syncDoneStart >= 2000) {
+                currentState = syncReturnState;   // mereu inapoi de unde am venit (admin)
+                needsDisplayUpdate = true;
+            }
+            break;
+
+        case STATE_SYNCED:
+            if (needsDisplayUpdate) { drawSyncedScreen(syncedByUnit); needsDisplayUpdate = false; }
+            if (millis() - syncedScreenStart >= 2000) {
+                refreshLEDs();
+                currentState = syncReturnState;   // mereu inapoi de unde am venit
+                needsDisplayUpdate = true;
+            }
+            break;
+
         case STATE_ADMIN_MENU:
             if (needsDisplayUpdate) {
                 drawAdminMenu(adminMenuIndex, adminScrollIndex, selectedMode);
@@ -866,6 +982,7 @@ void onShortPress(uint8_t btnIndex) {
             if (selectedMode == 2) {
                 currentState = STATE_RESPAWN_SETUP;
             } else {
+                loraSendMode(myRow().mode, 0);   // anuntam reteaua (sector/bomba)
                 currentState = STATE_LOADING;
                 loadingStartTime = millis();
             }
@@ -878,6 +995,7 @@ void onShortPress(uint8_t btnIndex) {
     } else if (currentState == STATE_RESPAWN_SETUP) {
         myRow().mode = 3;
         myRow().team = (Team)(btnIndex + 1);
+        loraSendMode(3, (uint8_t)myRow().team);   // anuntam reteaua (respawn + echipa)
         currentState = STATE_LOADING;
         loadingStartTime = millis();
         refreshLEDs();
@@ -1009,6 +1127,16 @@ void onShortPress(uint8_t btnIndex) {
         }
     }
 
+    else if (currentState == STATE_SYNC_WARNING) {
+        if (btnIndex == 0) {            // RED — inapoi in meniul admin
+            currentState = STATE_ADMIN_MENU;
+            needsDisplayUpdate = true;
+        } else if (btnIndex == 1) {     // BLUE — confirma sincronizarea
+            currentState = STATE_SYNCING;
+            needsDisplayUpdate = true;
+        }
+    }
+
     else if (currentState == STATE_ADMIN_MENU) {
         if (btnIndex == 2) {            // VERDE — scroll jos
             adminMenuIndex++;
@@ -1032,12 +1160,15 @@ void onShortPress(uint8_t btnIndex) {
 
         } else if (btnIndex == 3) {     // GALBEN — confirmare
             if (adminMenuIndex == 3) {
-                // SYNC UNITS — comunicarea LoRa vine in Faza 2
+                // SYNC UNITS — ecran de avertizare (confirmare cu BLUE)
+                syncReturnState = currentState;   // = STATE_ADMIN_MENU
+                currentState = STATE_SYNC_WARNING;
+                needsDisplayUpdate = true;
                 tone(PIN_BUZZER, 1000, 50);
-                Serial.println("[SYNC] Sync Units — vine in Faza 2 (LoRa).");
             } else if (adminMenuIndex == 5) {
                 // CHANGE MODE
                 selectedMode = -1;
+                loraSendMode(0, 0);   // anuntam reteaua: unitatea devine UNKNOWN
                 // Pastram punctele si kill-urile; resetam doar starea de mod
                 myRow().mode       = 0;
                 myRow().status     = 0;
@@ -1054,17 +1185,9 @@ void onShortPress(uint8_t btnIndex) {
                 needsDisplayUpdate = true;
                 tone(PIN_BUZZER, 1000, 300);
             } else if (adminMenuIndex == 6) {
-                // SYSTEM RESTART
-                display.clearDisplay();
-                display.setTextSize(2);
-                uint8_t x = (SCREEN_WIDTH - (strlen("REBOOTING") * 12)) / 2;
-                display.setCursor(x, 24);
-                display.print("REBOOTING");
-                display.display();
-                tone(PIN_BUZZER, 2000, 800);
-                uint32_t t = millis();
-                while (millis() - t < 800) {}  // exceptie acceptata — inainte de restart
-                ESP.restart();
+                // SYSTEM RESTART — anuntam reteaua, apoi reboot
+                loraSendRestart();
+                doReboot();
             } else if (adminMenuIndex == 7) {
                 // POWER OFF
                 currentState = STATE_POWER_OFF;

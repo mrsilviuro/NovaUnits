@@ -8,7 +8,7 @@
 // IDENTITATE UNITATE  — se schimba per unitate inainte de upload
 // ============================================================
 #define UNIT_ID 1
-#define NETWORK_ID "N01"
+#define NETWORK_ID 0x4E      // 1 octet, marker+filtru retea (schimba per lot de unitati)
 #define MAX_UNITS 12
 
 // ============================================================
@@ -44,6 +44,11 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
 // LORA
 // ============================================================
 #define LORA_BAUD_RATE 9600
+
+// --- Tipuri pachete LoRa ---
+#define PKT_SYNC 0x01
+#define PKT_RESTART 0x02
+#define PKT_MODE 0x03
 
 // ============================================================
 // DISPLAY OLED (2.42" SSD1309 condus de libraria SSD1306)
@@ -116,6 +121,9 @@ enum GameState : uint8_t {
   STATE_KILL_RESET_WINNER,
   STATE_KILL_RESET_DONE,
   STATE_TIME_RESET_ADMIN,
+  STATE_SYNC_WARNING,
+  STATE_SYNCING,
+  STATE_SYNCED,
   STATE_POWER_OFF
 };
 

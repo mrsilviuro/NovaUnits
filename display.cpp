@@ -344,6 +344,14 @@ static void formatElapsed(uint32_t totalSec, char* buf, size_t bufLen) {
         snprintf(buf, bufLen, "%usec", (unsigned)s);
 }
 
+// Mica baterie: corp 18x9 + terminal, cu 'bars' (0-4) bare pline
+static void drawBatteryIcon(uint8_t leftX, uint8_t y, uint8_t bars) {
+    display.drawRect(leftX, y, 18, 9, SSD1306_WHITE);
+    display.fillRect(leftX + 18, y + 2, 2, 5, SSD1306_WHITE);
+    for (uint8_t b = 0; b < bars && b < 4; b++)
+        display.fillRect(leftX + 2 + b * 4, y + 2, 3, 5, SSD1306_WHITE);
+}
+
 void drawPages(const PageContext& ctx) {
     display.clearDisplay();
     drawPageHeader(ctx.currentPage, ctx.batteryPercent);
@@ -726,8 +734,9 @@ void drawPages(const PageContext& ctx) {
             for (uint8_t i = 0; i < MAX_UNITS; i++) {
                 uint8_t m = ctx.globalUnitMode[i];
                 Team t = ctx.globalUnitStatus[i];
-                bool online = (ctx.lastSeenTime[i] > 0 && (now - ctx.lastSeenTime[i] <= 600000)) || (i == UNIT_ID - 1);
-                if (!online) continue;
+                bool everSeen = (ctx.lastSeenTime[i] > 0) || (i == UNIT_ID - 1);
+                if (!everSeen) continue;
+                bool offline = (i != UNIT_ID - 1) && (now - ctx.lastSeenTime[i] > 1800000);
                 rows[count].id = i;
                 rows[count].sortMode = (m == 0) ? 4 : m;
                 // Calcul timp pentru afisare
@@ -767,7 +776,9 @@ void drawPages(const PageContext& ctx) {
                     }
                 }
                 // Text status final
-                if (m == 1) {
+                if (offline) {
+                    strcpy(rows[count].status, "OFFLINE");
+                } else if (m == 1) {
                     if (t == TEAM_NEUTRAL)
                         strcpy(rows[count].status, "Neutral");
                     else if (showTime && hasTime)
@@ -836,11 +847,12 @@ void drawPages(const PageContext& ctx) {
         // ====================================================
         case 4: {
             uint32_t now = millis();
+            bool showBattery = ((now / 3000) % 2 == 0);
             uint8_t activeUnits[MAX_UNITS];
             uint8_t count = 0;
             for (uint8_t i = 0; i < MAX_UNITS; i++) {
-                bool online = (ctx.lastSeenTime[i] > 0 && (now - ctx.lastSeenTime[i] <= 600000)) || (i == UNIT_ID - 1);
-                if (online) activeUnits[count++] = i;
+                bool everSeen = (ctx.lastSeenTime[i] > 0) || (i == UNIT_ID - 1);
+                if (everSeen) activeUnits[count++] = i;
             }
             uint8_t scroll = ctx.page5ScrollIndex;
             if (count > 0 && scroll > count - 1) scroll = 0;
@@ -861,17 +873,26 @@ void drawPages(const PageContext& ctx) {
                         display.print("- ");
                     }
                     display.print(UNIT_NAMES[uid]);
-                    // Timp scurs de la ultimul semnal (h/min/sec)
-                    char syncText[20];
-                    if (ctx.lastSeenTime[uid] == 0) {
-                        strcpy(syncText, "--");
+                    bool offline = (uid != UNIT_ID - 1) && (now - ctx.lastSeenTime[uid] > 1800000);
+                    if (offline) {
+                        const char* off = "OFFLINE";
+                        uint8_t tw = strlen(off) * 6;
+                        display.setCursor(SCREEN_WIDTH - tw - rightMargin, y);
+                        display.print(off);
+                    } else if (showBattery) {
+                        drawBatteryIcon(SCREEN_WIDTH - 20 - rightMargin, y, ctx.globalBattery[uid]);
                     } else {
-                        uint32_t el = (now - ctx.lastSeenTime[uid]) / 1000;
-                        formatElapsed(el, syncText, sizeof(syncText));
+                        char syncText[20];
+                        if (ctx.lastSeenTime[uid] == 0) {
+                            strcpy(syncText, "--");
+                        } else {
+                            uint32_t el = (now - ctx.lastSeenTime[uid]) / 1000;
+                            formatElapsed(el, syncText, sizeof(syncText));
+                        }
+                        uint8_t tw = strlen(syncText) * 6;
+                        display.setCursor(SCREEN_WIDTH - tw - rightMargin, y);
+                        display.print(syncText);
                     }
-                    uint8_t tw = strlen(syncText) * 6;
-                    display.setCursor(SCREEN_WIDTH - tw - rightMargin, y);
-                    display.print(syncText);
                     shown++;
                 }
                 drawScrollbar(count, 4, scroll, 13, 51);
@@ -1367,5 +1388,26 @@ void drawKillResetDoneScreen(uint16_t points, uint8_t teamIndex, bool hasPoints)
         display.setCursor(x, 52);
         display.print(team);
     }
+    display.display();
+}
+
+void drawBonusScreen(uint16_t points, uint8_t teamIndex) {
+    display.clearDisplay();
+    display.setTextSize(2);
+    const char* l1 = "BONUS!";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 12)) / 2;
+    display.setCursor(x, 12);
+    display.print(l1);
+    display.setTextSize(1);
+    char buf[20];
+    snprintf(buf, sizeof(buf), "+%u points", points);
+    x = (SCREEN_WIDTH - (strlen(buf) * 6)) / 2;
+    display.setCursor(x, 36);
+    display.print(buf);
+    char team[20];
+    snprintf(team, sizeof(team), "for %s", TEAM_NAMES[teamIndex - 1]);
+    x = (SCREEN_WIDTH - (strlen(team) * 6)) / 2;
+    display.setCursor(x, 50);
+    display.print(team);
     display.display();
 }

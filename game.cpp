@@ -64,10 +64,6 @@ Team checkConquest() {
 int32_t teamScore(uint8_t team) {
     int32_t total = 0;
     for (uint8_t u = 0; u < MAX_UNITS; u++) total += unitTable[u].savedPoints[team];
-    // + acumularea LIVE a sectorului local detinut acum de aceasta echipa
-    if (myRow().mode == 1 && myRow().status == SEC_CAPTURED &&
-        myRow().team == (Team)(team + 1))
-        total += (int32_t)liveCapturePoints;
     return total;
 }
 
@@ -134,7 +130,8 @@ void buildContext(PageContext& ctx, uint8_t currentPage, uint8_t batteryPercent,
     else if (batteryPercent >= 40) localBars = 2;
     else if (batteryPercent >= 20) localBars = 1;
     globalBattery[UNIT_ID - 1] = localBars;
-    lastSeenTime[UNIT_ID - 1]  = millis();   // unitatea proprie e mereu "online"
+    // lastSeenTime[UNIT_ID-1] NU se mai seteaza aici: pe pag.5 arata acum timpul de la ultima TRANSMISIE
+    // (paginile 4/5 trateaza unitatea locala separat prin i==UNIT_ID-1, deci ramane mereu vizibila/online)
 
     // Datele tuturor unitatilor pentru paginile 4/5 (din tabel)
     for (uint8_t u = 0; u < MAX_UNITS; u++) {
@@ -156,4 +153,82 @@ void buildContext(PageContext& ctx, uint8_t currentPage, uint8_t batteryPercent,
 
     ctx.page4ScrollIndex = page4Scroll;
     ctx.page5ScrollIndex = page5Scroll;
+}
+
+// ============================================================
+// Ecrane SYNC (LoRa)
+// ============================================================
+void drawSyncWarningScreen() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    uint8_t x;
+    const char* l1 = "--- WARNING ---";
+    x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
+    display.setCursor(x, 0); display.print(l1);
+    const char* l2 = "All active units";
+    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
+    display.setCursor(x, 12); display.print(l2);
+    const char* l3 = "will sync data to";
+    x = (SCREEN_WIDTH - (strlen(l3) * 6)) / 2;
+    display.setCursor(x, 22); display.print(l3);
+    const char* l4 = "match this unit.";
+    x = (SCREEN_WIDTH - (strlen(l4) * 6)) / 2;
+    display.setCursor(x, 32); display.print(l4);
+    const char* l5 = "Continue?";
+    x = (SCREEN_WIDTH - (strlen(l5) * 6)) / 2;
+    display.setCursor(x, 42); display.print(l5);
+    const char* l6 = "RED: No     BLUE: Yes";
+    x = (SCREEN_WIDTH - (strlen(l6) * 6)) / 2;
+    display.setCursor(x, 56); display.print(l6);
+    display.display();
+}
+
+void drawSyncingScreen() {
+    display.clearDisplay();
+    display.setTextSize(2);
+    const char* l1 = "SYNCING";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 12)) / 2;
+    display.setCursor(x, 15);
+    display.print(l1);
+    display.setTextSize(1);
+    const char* l2 = "Please wait ...";
+    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
+    display.setCursor(x, 45);
+    display.print(l2);
+    display.display();
+}
+
+void drawSyncedScreen(uint8_t fromUnitId) {
+    display.clearDisplay();
+    display.setTextSize(2);
+    const char* l1 = "SYNCED!";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 12)) / 2;
+    display.setCursor(x, 14);
+    display.print(l1);
+    display.setTextSize(1);
+    char buf[25];
+    snprintf(buf, sizeof(buf), "by unit %s", UNIT_NAMES[fromUnitId - 1]);
+    x = (SCREEN_WIDTH - (strlen(buf) * 6)) / 2;
+    display.setCursor(x, 44);
+    display.print(buf);
+    display.display();
+}
+
+void drawSyncDoneScreen() {
+    display.clearDisplay();
+    display.setTextSize(2);
+    const char* l1 = "DONE";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 12)) / 2;
+    display.setCursor(x, 14);
+    display.print(l1);
+    display.setTextSize(1);
+    const char* l2 = "All active units";
+    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
+    display.setCursor(x, 40);
+    display.print(l2);
+    const char* l3 = "are synced";
+    x = (SCREEN_WIDTH - (strlen(l3) * 6)) / 2;
+    display.setCursor(x, 52);
+    display.print(l3);
+    display.display();
 }
