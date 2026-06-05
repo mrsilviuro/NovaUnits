@@ -7,7 +7,7 @@
 // ============================================================
 // IDENTITATE UNITATE  — se schimba per unitate inainte de upload
 // ============================================================
-#define UNIT_ID 1
+#define UNIT_ID 2
 #define NETWORK_ID 0x4E      // 1 octet, marker+filtru retea (schimba per lot de unitati)
 #define MAX_UNITS 12
 
@@ -49,6 +49,13 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
 #define PKT_SYNC 0x01
 #define PKT_RESTART 0x02
 #define PKT_MODE 0x03
+#define PKT_TIME_START  0x04
+#define PKT_TIME_PAUSE  0x05
+#define PKT_TIME_RESUME 0x06
+#define PKT_TIME_RESET  0x07
+#define PKT_CAPTURE     0x08
+#define PKT_NEUTRALIZE  0x09
+#define PKT_RESPAWN     0x0A
 
 // ============================================================
 // DISPLAY OLED (2.42" SSD1309 condus de libraria SSD1306)
@@ -125,6 +132,8 @@ enum GameState : uint8_t {
   STATE_SYNCING,
   STATE_SYNCED,
   STATE_SYNC_DONE,
+  STATE_TIME_ALERT,
+  STATE_ADMIN_BLOCKED,
   STATE_POWER_OFF
 };
 

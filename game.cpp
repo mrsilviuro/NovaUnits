@@ -7,8 +7,8 @@
 UnitRow unitTable[MAX_UNITS] = {};
 UnitRow& myRow() { return unitTable[UNIT_ID - 1]; }
 
-uint32_t liveCapturePoints = 0;
-uint32_t lastPointTick     = 0;
+int32_t  liveCapture[MAX_UNITS]  = {0};
+uint32_t lastPointTick[MAX_UNITS] = {0};
 
 int8_t  selectedMode        = -1;
 int32_t appliedPenalties[4] = {0, 0, 0, 0};
@@ -95,7 +95,7 @@ void buildContext(PageContext& ctx, uint8_t currentPage, uint8_t batteryPercent,
     // Sector (din randul propriu)
     ctx.sectorOwner          = (r.mode == 1 && r.status == SEC_CAPTURED) ? r.team : TEAM_NEUTRAL;
     ctx.captureStartTime     = r.actionTime;
-    ctx.currentCapturePoints = liveCapturePoints;
+    ctx.currentCapturePoints = (uint32_t)liveCapture[UNIT_ID - 1];
     ctx.bonusIntervalMinutes = bonusIntervalMinutes;
 
     // Bomb (din randul propriu)
@@ -230,5 +230,38 @@ void drawSyncDoneScreen() {
     x = (SCREEN_WIDTH - (strlen(l3) * 6)) / 2;
     display.setCursor(x, 52);
     display.print(l3);
+    display.display();
+}
+
+void drawTimeAlertScreen(uint8_t action) {
+    const char* l1; const char* l2;
+    switch (action) {
+        case 0:  l1 = "GAME";     l2 = "STARTED"; break;
+        case 1:  l1 = "GAME";     l2 = "PAUSED";  break;
+        case 2:  l1 = "GAME";     l2 = "RESUMED"; break;
+        default: l1 = "TIME WAS"; l2 = "RESET"; break;
+    }
+    display.clearDisplay();
+    display.setTextSize(2);
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 12)) / 2;
+    display.setCursor(x, 15);
+    display.print(l1);
+    x = (SCREEN_WIDTH - (strlen(l2) * 12)) / 2;
+    display.setCursor(x, 37);
+    display.print(l2);
+    display.display();
+}
+
+void drawBlockedScreen() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "Can't do that";
+    const char* l2 = "while playing ...";
+    uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
+    display.setCursor(x, 26);
+    display.print(l1);
+    x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
+    display.setCursor(x, 38);
+    display.print(l2);
     display.display();
 }

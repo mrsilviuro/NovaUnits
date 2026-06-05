@@ -671,8 +671,7 @@ void drawPages(const PageContext& ctx) {
                     display.print("- ");
                 }
                 display.print(TEAM_NAMES[i]);
-                int32_t displayed = ctx.liveScore[i] - ctx.appliedPenalties[i];
-                if (displayed < 0) displayed = 0;
+                int32_t displayed = ctx.liveScore[i] - ctx.appliedPenalties[i];   // poate fi negativ -> afisam cu minus
                 char ptsBuf[15];
                 snprintf(ptsBuf, sizeof(ptsBuf), "%ld", displayed);
                 uint8_t tw = strlen(ptsBuf) * 6;

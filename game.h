@@ -27,8 +27,8 @@ UnitRow& myRow();                      // randul unitatii curente = unitTable[UN
 Team checkConquest();
 
 // Acumulatorul de puncte LIVE al sectorului local (inca necomise in savedPoints)
-extern uint32_t liveCapturePoints;
-extern uint32_t lastPointTick;
+extern int32_t  liveCapture[MAX_UNITS];   // puncte estimate ale cuceririi curente, per unitate
+extern uint32_t lastPointTick[MAX_UNITS];  // tick 10s per unitate cucerita
 
 // Scor prin INSUMARE peste tabel (inlocuieste max()-ul din vechi)
 int32_t  teamScore(uint8_t team);       // suma savedPoints + live local (fara penalizari)

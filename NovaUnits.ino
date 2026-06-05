@@ -96,6 +96,18 @@ uint8_t    bonusTeam           = 0;
 uint32_t   bonusScreenStart    = 0;
 uint32_t   syncedScreenStart   = 0;
 uint32_t   syncDoneStart       = 0;
+GameState  alertReturnState    = STATE_MENU;
+uint8_t    timeAlertAction     = 0;
+uint32_t   timeAlertStart      = 0;
+bool       emitterApplyArmed   = false;   // expeditor: aplica actiunea cand TX s-a golit
+uint8_t    emitterPendingAction = 0;
+bool       sectorApplyArmed    = false;   // cucerire/neutralizare locala dupa AUX LOW
+uint8_t    sectorApplyType     = 0;       // 0=capture, 1=neutralize
+uint8_t    sectorApplyTeam     = 0;
+int32_t    sectorApplyPts      = 0;
+uint32_t   blockMsgStart       = 0;
+uint32_t   respawnWindowStart  = 0;
+GameState  blockReturnState    = STATE_ADMIN_MENU;
 
 // (selectedMode si starea de joc sunt in game.cpp — modelul/tabelul)
 
@@ -249,22 +261,22 @@ void handleActionProgress() {
     // 2. Timp atins -> SUCCESS
     if (elapsed >= actionTimeMs) {
         if (currentAction == ACT_CAPTURE) {
-            myRow().status     = SEC_CAPTURED;
-            myRow().team       = (Team)(actingTeam + 1);
-            myRow().actionTime = now;
-            liveCapturePoints  = 0;
-            lastPointTick      = now;
-            Serial.print("[SECTOR] Cucerit de: ");
+            // trimitem alerta in fundal; declaram cucerirea local dupa AUX LOW
+            loraSendCapture(actingTeam + 1);
+            sectorApplyArmed = true;
+            sectorApplyType  = 0;
+            sectorApplyTeam  = actingTeam + 1;
+            Serial.print("[SECTOR] Cucerire trimisa: ");
             Serial.println(TEAM_NAMES[actingTeam]);
         } else if (currentAction == ACT_NEUTRALIZE) {
-            // punctele live au fost deja comise in timp real -> doar resetam
-            myRow().status     = SEC_NEUTRAL;
-            myRow().team       = TEAM_NEUTRAL;
-            myRow().actionTime = now;
-            liveCapturePoints  = 0;
-            lastPointTick      = 0;
-            Serial.print("[SECTOR] Neutralizat de: ");
-            Serial.println(TEAM_NAMES[actingTeam]);
+            // puncte exacte = contorul live al acestei unitati; trimitem, aplicam dupa AUX LOW
+            sectorApplyPts   = liveCapture[UNIT_ID - 1];
+            loraSendNeutralize((uint8_t)myRow().team, sectorApplyPts);
+            sectorApplyArmed = true;
+            sectorApplyType  = 1;
+            sectorApplyTeam  = (uint8_t)myRow().team;
+            Serial.print("[SECTOR] Neutralizare trimisa, pts=");
+            Serial.println(sectorApplyPts);
         } else if (currentAction == ACT_ARM) {
             myRow().status     = BOMB_ARMED;
             myRow().team       = (Team)(actingTeam + 1);
@@ -306,7 +318,6 @@ void handleActionProgress() {
 void applyGamePause() {
     isGamePaused = true;
     pauseStartTime = millis();
-    tone(PIN_BUZZER, 500, 300);
     needsDisplayUpdate = true;
     Serial.println("[GAME] PAUSED!");
 }
@@ -316,15 +327,66 @@ void applyGameResume() {
     isGamePaused = false;
     // Ajustam toti timpii absoluti cu durata pauzei (ca sa nu "sara" timpul)
     if (isGameTimerRunning)      lastTimerTick += pauseDuration;
-    if (myRow().actionTime > 0)  myRow().actionTime += pauseDuration;
-    if (lastPointTick > 0)       lastPointTick += pauseDuration;
+    // sectoare cucerite (toate unitatile): ajustam actionTime + tick
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        if (unitTable[u].mode == 1 && unitTable[u].status == SEC_CAPTURED) {
+            if (unitTable[u].actionTime > 0) unitTable[u].actionTime += pauseDuration;
+            if (lastPointTick[u] > 0)        lastPointTick[u] += pauseDuration;
+        }
+    }
+    // bomba locala (arm/cooldown): ajustam actionTime
+    if (myRow().mode == 2 && (myRow().status == BOMB_ARMED || myRow().status == BOMB_COOLDOWN) && myRow().actionTime > 0)
+        myRow().actionTime += pauseDuration;
     for (uint8_t i = 0; i < queueCount; i++) {
         uint8_t idx = (queueHead + i) % 100;
         respawnQueue[idx] += pauseDuration;
     }
-    tone(PIN_BUZZER, 800, 300);
     needsDisplayUpdate = true;
     Serial.println("[GAME] RESUMED!");
+}
+
+// ============================================================
+// applyTimerAction() — aplica local actiunea de timp (0=start,1=pause,2=resume,3=reset)
+// ============================================================
+void applyTimerAction(uint8_t action) {
+    if (action == 0) {            // START
+        isGameTimerRunning = true;
+        lastTimerTick = millis();
+        Serial.println("[GAME] START!");
+    } else if (action == 1) {     // PAUSE
+        applyGamePause();
+    } else if (action == 2) {     // RESUME
+        applyGameResume();
+    } else if (action == 3) {     // RESET CEAS
+        gameTimeLeftSeconds = gameTimeLimitSeconds;
+        isGameTimerRunning  = false;
+        isTimeOut           = false;
+        lastTimerTick       = millis();
+        Serial.println("[GAME] Ceas resetat la timpul initial!");
+    }
+}
+
+// ============================================================
+// applyCapture() / applyNeutralize() — folosite si local (dupa AUX LOW) si la receptie
+// ============================================================
+void applyCapture(uint8_t u, uint8_t team) {
+    unitTable[u].status     = SEC_CAPTURED;
+    unitTable[u].team       = (Team)team;
+    unitTable[u].actionTime = millis();
+    liveCapture[u]   = 0;
+    lastPointTick[u] = millis();
+}
+
+void applyNeutralize(uint8_t u, uint8_t team, int32_t exactPts) {
+    if (team >= 1 && team <= 4) {
+        unitTable[u].savedPoints[team - 1] -= liveCapture[u];   // scot estimarea live
+        unitTable[u].savedPoints[team - 1] += exactPts;         // pun valoarea exacta (de la sursa)
+    }
+    liveCapture[u]   = 0;
+    lastPointTick[u] = 0;
+    unitTable[u].status     = SEC_NEUTRAL;
+    unitTable[u].team       = TEAM_NEUTRAL;
+    unitTable[u].actionTime = millis();
 }
 
 // ============================================================
@@ -334,7 +396,9 @@ void applyKillsReset() {
     for (uint8_t u = 0; u < MAX_UNITS; u++)
         for (uint8_t t = 0; t < 4; t++)
             unitTable[u].kills[t] = 0;
-    queueCount = 0;
+    for (uint8_t t = 0; t < 4; t++)
+        appliedPenalties[t] = 0;   // penalizarile sunt derivate din kill-uri -> le resetam impreuna
+        queueCount = 0;
     queueHead = 0;
     queueTail = 0;
     needsDisplayUpdate = true;
@@ -365,6 +429,9 @@ void setup() {
     esp_bt_controller_disable();
 
     Serial.begin(115200);
+
+    // Seed per-unitate pentru jitter-ul copiei a doua (UNIT_ID garanteaza secvente diferite)
+    randomSeed(micros() ^ ((uint32_t)UNIT_ID * 2654435761UL));
 
     // Power latch — tinem alimentarea pornita
     pinMode(PIN_LATCH, OUTPUT);
@@ -398,6 +465,20 @@ void loop() {
     // LoRa: ceas comun + coada TX (background) + receptie pachete
     loraTick();
     loraTxUpdate();
+    if (emitterApplyArmed && loraTxIdle()) {   // alerta de timp a iesit (AUX LOW) -> aplicam local
+        applyTimerAction(emitterPendingAction);
+        emitterApplyArmed = false;
+    }
+    if (sectorApplyArmed && loraTxIdle()) {    // alerta de sector a iesit (AUX LOW) -> aplicam local
+        if (sectorApplyType == 0) applyCapture(UNIT_ID - 1, sectorApplyTeam);
+        else                      applyNeutralize(UNIT_ID - 1, sectorApplyTeam, sectorApplyPts);
+        sectorApplyArmed = false;
+    }
+    if (respawnWindowStart != 0 && now >= respawnWindowStart && now - respawnWindowStart >= 15000) {
+        if (myRow().team != TEAM_NEUTRAL)
+            loraSendRespawn((uint8_t)myRow().team, myRow().kills[myRow().team - 1]);   // trimitem totalul curent
+            respawnWindowStart = 0;
+    }
     if (currentState != STATE_SYNCING && currentState != STATE_SYNC_WARNING &&
         currentState != STATE_SYNCED && currentState != STATE_SYNC_DONE) {
         LoraEvent ev = loraPoll();
@@ -410,6 +491,37 @@ void loop() {
         tone(PIN_BUZZER, 1500, 600);
     } else if (ev == LORA_EVT_RESTART) {
         doReboot();
+    } else if (ev == LORA_EVT_TIME && currentState != STATE_TIME_ALERT) {
+        if (loraTimeAction == 2) gameTimeLeftSeconds = loraResumeTime;   // snap la secunda primita inainte de resume
+        applyTimerAction(loraTimeAction);            // aplicam imediat actiunea
+        timeAlertAction  = loraTimeAction;
+        timeAlertStart   = now;
+        alertReturnState = currentState;             // unde revenim dupa feedback
+        currentState = STATE_TIME_ALERT;
+        needsDisplayUpdate = true;
+        for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], HIGH);
+        tone(PIN_BUZZER, 1500, 600);
+    } else if (ev == LORA_EVT_CAPTURE) {
+        if (unitTable[loraEvtUnit - 1].status != SEC_CAPTURED) {   // ignoram copia dubla
+            applyCapture(loraEvtUnit - 1, loraEvtTeam);
+            tone(PIN_BUZZER, 1800, 600);   // doar audio (fara LED/ecran)
+            needsDisplayUpdate = true;
+        }
+    } else if (ev == LORA_EVT_NEUTRALIZE) {
+        if (unitTable[loraEvtUnit - 1].status == SEC_CAPTURED) {    // ignoram copia dubla
+            applyNeutralize(loraEvtUnit - 1, loraEvtTeam, loraEvtPoints);
+            tone(PIN_BUZZER, 1800, 600);   // doar audio (fara LED/ecran)
+            needsDisplayUpdate = true;
+        }
+    } else if (ev == LORA_EVT_RESPAWN) {
+        uint8_t ti = loraEvtTeam - 1;
+        if ((uint16_t)loraEvtPoints > unitTable[loraEvtUnit - 1].kills[ti]) {   // total nou > cunoscut -> aplicam delta (autocorectie); copia dubla e ignorata
+            uint16_t delta = (uint16_t)loraEvtPoints - unitTable[loraEvtUnit - 1].kills[ti];
+            unitTable[loraEvtUnit - 1].kills[ti] = (uint16_t)loraEvtPoints;
+            appliedPenalties[ti] += (int32_t)delta * (int32_t)respawnPenaltyPoints;   // necplafonat; afisarea clampeaza la 0
+            tone(PIN_BUZZER, 1500, 100);   // beep scurt
+            needsDisplayUpdate = true;
+        }
     }
         }
 
@@ -533,19 +645,21 @@ void loop() {
         }
     }
 
-        // Sector — puncte LIVE (3 + bonus la fiecare 10s cat timp e cucerit)
-        if (selectedMode == 0 && myRow().status == SEC_CAPTURED && lastPointTick == 0)
-        lastPointTick = now;
-    if (!isTimeOut && !isGamePaused && selectedMode == 0 && myRow().status == SEC_CAPTURED) {
-        if (now - lastPointTick >= 10000) {
-            uint32_t minutesHeld = (now - myRow().actionTime) / 60000;
-            uint32_t bonus = (bonusIntervalMinutes > 0) ? (minutesHeld / bonusIntervalMinutes) : 0;
-            if (bonus > 3) bonus = 3;
-            int32_t gain = 3 + bonus;
-            liveCapturePoints += gain;                          // contor afisaj pagina 1
-            if (myRow().team != TEAM_NEUTRAL)
-                myRow().savedPoints[myRow().team - 1] += gain;  // comitem in timp real
-                lastPointTick += 10000;
+    // Sector — puncte LIVE per unitate cucerita (3 + bonus la fiecare 10s)
+    if (!isTimeOut && !isGamePaused) {
+        for (uint8_t u = 0; u < MAX_UNITS; u++) {
+            if (unitTable[u].mode == 1 && unitTable[u].status == SEC_CAPTURED && unitTable[u].team != TEAM_NEUTRAL) {
+                if (lastPointTick[u] == 0 || lastPointTick[u] > now) lastPointTick[u] = now;   // clamp: evita underflow
+                if (now - lastPointTick[u] >= 10000) {
+                    uint32_t minutesHeld = (now - unitTable[u].actionTime) / 60000;
+                    uint32_t bonus = (bonusIntervalMinutes > 0) ? (minutesHeld / bonusIntervalMinutes) : 0;
+                    if (bonus > 3) bonus = 3;
+                    int32_t gain = 3 + bonus;
+                    unitTable[u].savedPoints[unitTable[u].team - 1] += gain;   // comitem in timp real
+                    liveCapture[u] += gain;                                    // estimare cucerire curenta
+                    lastPointTick[u] += 10000;
+                }
+            }
         }
     }
 
@@ -741,26 +855,19 @@ void loop() {
                 RfidReadData rfid = rfidReadTag();
                 lastRfidRead = millis();
                 if (rfid.result == RFID_READ_ADMIN) {
-                    if (pendingAdminAction == 0) {            // START
-                        isGameTimerRunning = true;
-                        lastTimerTick = millis();
-                        Serial.println("[GAME] START!");
-                    } else if (pendingAdminAction == 1) {    // PAUSE
-                        applyGamePause();
-                    } else if (pendingAdminAction == 2) {    // RESUME
-                        applyGameResume();
-                    } else if (pendingAdminAction == 3) {    // RESET CEAS
-                        gameTimeLeftSeconds = gameTimeLimitSeconds;
-                        isGameTimerRunning = false;
-                        isTimeOut = false;
-                        lastTimerTick = millis();
-                        Serial.println("[GAME] Ceas resetat la timpul initial!");
-                    }
-                    rfidIgnoreUntil = millis() + 2000;
-                    currentState = STATE_PAGES;
-                    currentPage = 5;
+                    // feedback identic cu receptoarele; transmitem in fundal, aplicam dupa AUX LOW
+                    loraSendTime(PKT_TIME_START + pendingAdminAction, (uint16_t)gameTimeLeftSeconds);
+                    emitterPendingAction = pendingAdminAction;
+                    emitterApplyArmed    = true;
+                    timeAlertAction  = pendingAdminAction;
+                    timeAlertStart   = millis();
+                    alertReturnState = STATE_PAGES;
+                    currentPage      = 5;
+                    currentState     = STATE_TIME_ALERT;
+                    for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], HIGH);
+                    tone(PIN_BUZZER, 1500, 600);
                     needsDisplayUpdate = true;
-                    tone(PIN_BUZZER, 1500, 200);
+                    rfidIgnoreUntil = millis() + 2000;
                 } else if (rfid.result == RFID_READ_POINTS || rfid.result == RFID_READ_INVALID) {
                     tone(PIN_BUZZER, 200, 300);   // card gresit
                 }
@@ -861,6 +968,23 @@ void loop() {
             if (millis() - syncDoneStart >= 2000) {
                 refreshLEDs();                    // restauram starea corecta a LED-urilor
                 currentState = syncReturnState;   // mereu inapoi de unde am venit (admin)
+                needsDisplayUpdate = true;
+            }
+            break;
+
+        case STATE_TIME_ALERT:
+            if (needsDisplayUpdate) { drawTimeAlertScreen(timeAlertAction); needsDisplayUpdate = false; }
+            if (millis() - timeAlertStart >= 2000) {
+                refreshLEDs();
+                currentState = alertReturnState;
+                needsDisplayUpdate = true;
+            }
+            break;
+
+        case STATE_ADMIN_BLOCKED:
+            if (needsDisplayUpdate) { drawBlockedScreen(); needsDisplayUpdate = false; }
+            if (millis() - blockMsgStart >= 2000) {
+                currentState = blockReturnState;
                 needsDisplayUpdate = true;
             }
             break;
@@ -1014,11 +1138,19 @@ void onShortPress(uint8_t btnIndex) {
             needsDisplayUpdate = true;
         } else if (btnIndex == 2) {     // VERDE — scroll pe paginile 4 si 5
             if (currentPage == 2 && !isTimeOut) {
-                // PAGE 3 — VERDE: reset kill-uri
-                killResetAdminStart = millis();
-                currentState = STATE_KILL_RESET_ADMIN;
-                needsDisplayUpdate = true;
-                tone(PIN_BUZZER, 1000, 100);
+                // PAGE 3 — VERDE: reset kill-uri (blocat cat timp jocul ruleaza)
+                if (isGameTimerRunning && !isGamePaused) {
+                    blockReturnState = STATE_PAGES;
+                    blockMsgStart = millis();
+                    currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else {
+                    killResetAdminStart = millis();
+                    currentState = STATE_KILL_RESET_ADMIN;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1000, 100);
+                }
             } else if (currentPage == 3) {
                 page4ScrollIndex++;
                 needsDisplayUpdate = true;
@@ -1026,12 +1158,20 @@ void onShortPress(uint8_t btnIndex) {
                 page5ScrollIndex++;
                 needsDisplayUpdate = true;
             } else if (currentPage == 5 && gameTimeLimitSeconds > 0 && !isTimeOut) {
-                // PAGE 6 — VERDE: reset ceas
-                pendingAdminAction = 3;
-                waitAdminTagStart = millis();
-                currentState = STATE_WAIT_ADMIN_TAG;
-                needsDisplayUpdate = true;
-                tone(PIN_BUZZER, 1000, 100);
+                // PAGE 6 — VERDE: reset ceas (blocat cat timp jocul ruleaza)
+                if (isGameTimerRunning && !isGamePaused) {
+                    blockReturnState = STATE_PAGES;
+                    blockMsgStart = millis();
+                    currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else {
+                    pendingAdminAction = 3;
+                    waitAdminTagStart = millis();
+                    currentState = STATE_WAIT_ADMIN_TAG;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1000, 100);
+                }
             }
             // pag 3 (kill reset) -> pasii urmatori
         } else if (btnIndex == 3) {     // GALBEN
@@ -1048,9 +1188,8 @@ void onShortPress(uint8_t btnIndex) {
                         queueTail = (queueTail + 1) % 100;
                         queueCount++;
                         myRow().kills[ti]++;
-                        int32_t penalty = min((int32_t)respawnPenaltyPoints,
-                                              teamScore(ti) - appliedPenalties[ti]);
-                        if (penalty > 0) appliedPenalties[ti] += penalty;
+                        appliedPenalties[ti] += respawnPenaltyPoints;   // necplafonat; afisarea clampeaza la 0
+                        if (respawnWindowStart == 0) respawnWindowStart = millis();   // primul kill -> deschidem fereastra de 15s
                         needsDisplayUpdate = true;
                         Serial.print("[RESPAWN] Kill inregistrat. Queue: ");
                         Serial.println(queueCount);
@@ -1161,31 +1300,55 @@ void onShortPress(uint8_t btnIndex) {
             needsDisplayUpdate = true;
 
         } else if (btnIndex == 3) {     // GALBEN — confirmare
+            bool gameActive = isGameTimerRunning && !isGamePaused && !isTimeOut;
+            blockReturnState = STATE_ADMIN_MENU;
             if (adminMenuIndex == 3) {
-                // SYNC UNITS — ecran de avertizare (confirmare cu BLUE)
-                syncReturnState = currentState;   // = STATE_ADMIN_MENU
-                currentState = STATE_SYNC_WARNING;
-                needsDisplayUpdate = true;
-                tone(PIN_BUZZER, 1000, 50);
+                // SYNC UNITS — blocat cat timp jocul ruleaza si timpul se scurge
+                if (gameActive) {
+                    blockMsgStart = millis();
+                    currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else {
+                    syncReturnState = currentState;   // = STATE_ADMIN_MENU
+                    currentState = STATE_SYNC_WARNING;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1000, 50);
+                }
             } else if (adminMenuIndex == 5) {
-                // CHANGE MODE
-                selectedMode = -1;
-                loraSendMode(0, 0);   // anuntam reteaua: unitatea devine UNKNOWN
-                // Pastram punctele si kill-urile; resetam doar starea de mod
-                myRow().mode       = 0;
-                myRow().status     = 0;
-                myRow().team       = TEAM_NEUTRAL;
-                myRow().actionTime = 0;
-                liveCapturePoints = 0;
-                lastPointTick = 0;
-                queueCount = queueHead = queueTail = 0;
-                currentState = STATE_MENU;
-                menuIndex = 0;
-                adminMenuIndex = 0;
-                adminScrollIndex = 0;
-                refreshLEDs();
-                needsDisplayUpdate = true;
-                tone(PIN_BUZZER, 1000, 300);
+                // CHANGE MODE — blocat daca jocul ruleaza / sector cucerit / bomba armata / queue respawn
+                bool changeBlocked = gameActive
+                || (myRow().mode == 1 && myRow().status == SEC_CAPTURED)
+                || (myRow().mode == 2 && myRow().status == BOMB_ARMED)
+                || (queueCount > 0);
+                if (changeBlocked) {
+                    blockMsgStart = millis();
+                    currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else {
+                    // intai flush fereastra de kill-uri (daca e deschisa), apoi anuntam change mode
+                    if (respawnWindowStart != 0 && myRow().team != TEAM_NEUTRAL)
+                        loraSendRespawn((uint8_t)myRow().team, myRow().kills[myRow().team - 1]);
+                    respawnWindowStart = 0;
+                    selectedMode = -1;
+                    loraSendMode(0, 0);   // anuntam reteaua: unitatea devine UNKNOWN
+                    // Pastram punctele si kill-urile; resetam doar starea de mod
+                    myRow().mode       = 0;
+                    myRow().status     = 0;
+                    myRow().team       = TEAM_NEUTRAL;
+                    myRow().actionTime = 0;
+                    liveCapture[UNIT_ID - 1] = 0;
+                    lastPointTick[UNIT_ID - 1] = 0;
+                    queueCount = queueHead = queueTail = 0;
+                    currentState = STATE_MENU;
+                    menuIndex = 0;
+                    adminMenuIndex = 0;
+                    adminScrollIndex = 0;
+                    refreshLEDs();
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1000, 300);
+                }
             } else if (adminMenuIndex == 6) {
                 // SYSTEM RESTART — anuntam reteaua, apoi reboot
                 loraSendRestart();
@@ -1198,13 +1361,21 @@ void onShortPress(uint8_t btnIndex) {
                 needsDisplayUpdate = true;
                 tone(PIN_BUZZER, 1500, 300);
             } else {
-                if      (adminMenuIndex == 0) adminSelectedPage = 0;
-                else if (adminMenuIndex == 1) adminSelectedPage = 1;
-                else if (adminMenuIndex == 2) adminSelectedPage = 2;
-                else if (adminMenuIndex == 4) adminSelectedPage = 3;
-                syncAdminIndices();
-                currentState = STATE_ADMIN_PAGES;
-                needsDisplayUpdate = true;
+                // Game Settings(0)/Bomb Parameters(1)/Respawn Rules(2) blocate cat timp jocul ruleaza; TAG Writer(4) liber
+                if (gameActive && adminMenuIndex != 4) {
+                    blockMsgStart = millis();
+                    currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else {
+                    if      (adminMenuIndex == 0) adminSelectedPage = 0;
+                    else if (adminMenuIndex == 1) adminSelectedPage = 1;
+                    else if (adminMenuIndex == 2) adminSelectedPage = 2;
+                    else if (adminMenuIndex == 4) adminSelectedPage = 3;
+                    syncAdminIndices();
+                    currentState = STATE_ADMIN_PAGES;
+                    needsDisplayUpdate = true;
+                }
             }
 
         } else if (btnIndex == 0) {     // ROSU — inapoi la joc
