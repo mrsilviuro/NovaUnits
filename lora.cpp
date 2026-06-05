@@ -344,8 +344,7 @@ void loraSendCapture(uint8_t team) {
     uint8_t cs = 0;
     for (uint8_t i = 0; i < CAPTURE_PKT_LEN - 1; i++) cs ^= buf[i];
     buf[CAPTURE_PKT_LEN - 1] = cs;
-    loraQueueSend(buf, CAPTURE_PKT_LEN);
-    loraQueueSend(buf, CAPTURE_PKT_LEN);
+    loraQueueSendDup(buf, CAPTURE_PKT_LEN);
     Serial.print("[LORA] CAPTURE pus in coada, team="); Serial.println(team);
 }
 
@@ -362,8 +361,7 @@ void loraSendNeutralize(uint8_t team, int32_t points) {
     uint8_t cs = 0;
     for (uint8_t i = 0; i < NEUT_PKT_LEN - 1; i++) cs ^= buf[i];
     buf[NEUT_PKT_LEN - 1] = cs;
-    loraQueueSend(buf, NEUT_PKT_LEN);
-    loraQueueSend(buf, NEUT_PKT_LEN);
+    loraQueueSendDup(buf, NEUT_PKT_LEN);
     Serial.print("[LORA] NEUTRALIZE pus in coada, team="); Serial.print(team);
     Serial.print(" pts="); Serial.println(p);
 }
@@ -380,8 +378,7 @@ void loraSendRespawn(uint8_t team, uint16_t totalKills) {
     uint8_t cs = 0;
     for (uint8_t i = 0; i < RESPAWN_PKT_LEN - 1; i++) cs ^= buf[i];
     buf[RESPAWN_PKT_LEN - 1] = cs;
-    loraQueueSend(buf, RESPAWN_PKT_LEN);
-    loraQueueSend(buf, RESPAWN_PKT_LEN);
+    loraQueueSendDup(buf, RESPAWN_PKT_LEN);
     Serial.print("[LORA] RESPAWN pus in coada, team="); Serial.print(team);
     Serial.print(" totalKills="); Serial.println(totalKills);
 }

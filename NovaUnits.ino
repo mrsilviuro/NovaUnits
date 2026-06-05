@@ -101,6 +101,7 @@ uint8_t    timeAlertAction     = 0;
 uint32_t   timeAlertStart      = 0;
 bool       emitterApplyArmed   = false;   // expeditor: aplica actiunea cand TX s-a golit
 uint8_t    emitterPendingAction = 0;
+uint32_t   lastTimeAt[4]        = {0, 0, 0, 0};   // dedup TIME: momentul ultimei procesari per actiune
 bool       sectorApplyArmed    = false;   // cucerire/neutralizare locala dupa AUX LOW
 uint8_t    sectorApplyType     = 0;       // 0=capture, 1=neutralize
 uint8_t    sectorApplyTeam     = 0;
@@ -491,16 +492,21 @@ void loop() {
         tone(PIN_BUZZER, 1500, 600);
     } else if (ev == LORA_EVT_RESTART) {
         doReboot();
-    } else if (ev == LORA_EVT_TIME && currentState != STATE_TIME_ALERT) {
+    } else if (ev == LORA_EVT_TIME) {
+        // dedup: ignoram copia a doua a aceleiasi actiuni (fereastra > slotul maxim ~8.6s)
+        if (loraTimeAction < 4 &&
+            (lastTimeAt[loraTimeAction] == 0 || now - lastTimeAt[loraTimeAction] >= 12000)) {
+            lastTimeAt[loraTimeAction] = now;
         if (loraTimeAction == 2) gameTimeLeftSeconds = loraResumeTime;   // snap la secunda primita inainte de resume
         applyTimerAction(loraTimeAction);            // aplicam imediat actiunea
         timeAlertAction  = loraTimeAction;
         timeAlertStart   = now;
-        alertReturnState = currentState;             // unde revenim dupa feedback
+        alertReturnState = (currentState == STATE_TIME_ALERT) ? alertReturnState : currentState;
         currentState = STATE_TIME_ALERT;
         needsDisplayUpdate = true;
         for (uint8_t i = 0; i < 4; i++) digitalWrite(PIN_LEDS[i], HIGH);
         tone(PIN_BUZZER, 1500, 600);
+            }
     } else if (ev == LORA_EVT_CAPTURE) {
         if (unitTable[loraEvtUnit - 1].status != SEC_CAPTURED) {   // ignoram copia dubla
             applyCapture(loraEvtUnit - 1, loraEvtTeam);
