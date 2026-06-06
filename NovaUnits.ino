@@ -89,6 +89,7 @@ uint8_t    killResetWinnerTeam = 255;
 uint16_t   killResetPoints     = 0;
 bool       killResetHasPoints  = false;
 uint32_t   killResetDoneStart  = 0;
+uint32_t   lastKillResetAt     = 0;   // dedup KILLRESET
 
 // --- Card puncte (bonus) ---
 uint16_t   bonusPoints         = 0;
@@ -551,6 +552,15 @@ void loop() {
             tone(PIN_BUZZER, 1800, 600);
             needsDisplayUpdate = true;
         }
+    } else if (ev == LORA_EVT_KILLRESET) {
+        if (lastKillResetAt == 0 || now - lastKillResetAt >= 12000) {   // dedup: ignoram copia a doua
+            lastKillResetAt = now;
+            applyKillsReset();
+            if (loraEvtTeam >= 1 && loraEvtTeam <= 4 && loraEvtPoints > 0)
+                unitTable[loraEvtUnit - 1].savedPoints[loraEvtTeam - 1] += (int32_t)loraEvtPoints;
+            tone(PIN_BUZZER, 1500, 200);
+            needsDisplayUpdate = true;
+        }
     }
         }
 
@@ -953,6 +963,7 @@ void loop() {
                             currentState = STATE_KILL_RESET_CONFIRM;   // intrebam DA/NU
                         } else {
                             applyKillsReset();                          // reset direct
+                            loraSendKillReset(0, 0);                    // anuntam reteaua (fara puncte)
                             currentPage = 2;
                             killResetHasPoints = false;
                             killResetDoneStart = millis();
@@ -1286,6 +1297,7 @@ void onShortPress(uint8_t btnIndex) {
     else if (currentState == STATE_KILL_RESET_CONFIRM) {
         if (btnIndex == 0) {            // RED — Nu, reset fara puncte
             applyKillsReset();
+            loraSendKillReset(0, 0);    // anuntam reteaua (fara puncte)
             currentPage = 2;
             killResetHasPoints = false;
             killResetDoneStart = millis();
@@ -1309,6 +1321,7 @@ void onShortPress(uint8_t btnIndex) {
             killResetHasPoints = true;
             if (pts > 0) myRow().savedPoints[btnIndex] += (int32_t)pts;
             applyKillsReset();
+            loraSendKillReset((uint8_t)(btnIndex + 1), pts);   // anuntam reteaua (cu puncte)
             currentPage = 2;
             killResetDoneStart = millis();
             currentState = STATE_KILL_RESET_DONE;

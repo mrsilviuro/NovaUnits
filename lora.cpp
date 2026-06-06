@@ -28,6 +28,7 @@ uint8_t  syncedByUnit    = 0;
 #define NEUT_PKT_LEN    7       // [NET][TYPE][UNIT][team][pts_hi][pts_lo][CRC]
 #define RESPAWN_PKT_LEN 7       // [NET][TYPE][UNIT][team][kills_hi][kills_lo][CRC]
 #define BOMB_PKT_LEN    5       // [NET][TYPE][UNIT][team][CRC]
+#define KILLRESET_PKT_LEN 7     // [NET][TYPE][UNIT][winnerTeam][pts_hi][pts_lo][CRC]
 
 // ============================================================
 // Bit-cursor: scriem/citim cate nbits, MSB-first, pe un buffer
@@ -412,6 +413,23 @@ void loraSendBombDefuse(uint8_t team) {
     Serial.print("[LORA] BOMB DEFUSE pus in coada, team="); Serial.println(team);
 }
 
+void loraSendKillReset(uint8_t winnerTeam, uint16_t pts) {
+    if (!isSynced) return;
+    uint8_t buf[KILLRESET_PKT_LEN];
+    buf[0] = (uint8_t)NETWORK_ID;
+    buf[1] = PKT_KILLRESET;
+    buf[2] = unitByte();
+    buf[3] = winnerTeam;                  // 0 = fara puncte, 1..4 = castigator
+    buf[4] = (pts >> 8) & 0xFF;
+    buf[5] = pts & 0xFF;
+    uint8_t cs = 0;
+    for (uint8_t i = 0; i < KILLRESET_PKT_LEN - 1; i++) cs ^= buf[i];
+    buf[KILLRESET_PKT_LEN - 1] = cs;
+    loraQueueSendDup(buf, KILLRESET_PKT_LEN);
+    Serial.print("[LORA] KILLRESET pus in coada, winner="); Serial.print(winnerTeam);
+    Serial.print(" pts="); Serial.println(pts);
+}
+
 // ============================================================
 // loraPoll() — citeste UART; intoarce evenimentul primit
 // ============================================================
@@ -441,6 +459,7 @@ LoraEvent loraPoll() {
         else if (rxBuf[1] == PKT_NEUTRALIZE) rxLen = NEUT_PKT_LEN;
         else if (rxBuf[1] == PKT_RESPAWN)    rxLen = RESPAWN_PKT_LEN;
         else if (rxBuf[1] == PKT_BOMB_PLANT || rxBuf[1] == PKT_BOMB_DEFUSE) rxLen = BOMB_PKT_LEN;
+        else if (rxBuf[1] == PKT_KILLRESET) rxLen = KILLRESET_PKT_LEN;
         else { rxCount = 0; rxLen = 0; break; }   // tip necunoscut -> resync
     }
         }
@@ -552,6 +571,20 @@ LoraEvent loraPoll() {
         Serial.print("[LORA] BOMB "); Serial.print(type == PKT_BOMB_PLANT ? "PLANT" : "DEFUSE");
         Serial.print(" de la unit "); Serial.println(u);
         return (type == PKT_BOMB_PLANT) ? LORA_EVT_BOMB_PLANT : LORA_EVT_BOMB_DEFUSE;
+    }
+
+    if (type == PKT_KILLRESET) {
+        if (!isSynced) return LORA_EVT_NONE;
+        uint8_t u = rxBuf[2] & 0x0F;
+        if (u == UNIT_ID) return LORA_EVT_NONE;
+        uint8_t batt = (rxBuf[2] >> 4) & 0x07;
+        if (u >= 1 && u <= MAX_UNITS) { globalBattery[u-1] = batt; lastSeenTime[u-1] = millis(); }
+        loraEvtUnit = u;
+        loraEvtTeam = rxBuf[3];                                 // 0 = fara puncte, 1..4 = castigator
+        loraEvtPoints = ((int32_t)rxBuf[4] << 8) | rxBuf[5];    // puncte exacte
+        Serial.print("[LORA] KILLRESET de la unit "); Serial.print(u);
+        Serial.print(" winner="); Serial.print(loraEvtTeam); Serial.print(" pts="); Serial.println(loraEvtPoints);
+        return LORA_EVT_KILLRESET;
     }
 
     // --- SYNC ---
