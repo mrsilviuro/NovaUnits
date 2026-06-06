@@ -735,7 +735,7 @@ void drawPages(const PageContext& ctx) {
                 Team t = ctx.globalUnitStatus[i];
                 bool everSeen = (ctx.lastSeenTime[i] > 0) || (i == UNIT_ID - 1);
                 if (!everSeen) continue;
-                bool offline = (i != UNIT_ID - 1) && (now - ctx.lastSeenTime[i] > 1800000);
+                bool offline = (ctx.lastSeenTime[i] > 0) && (now - ctx.lastSeenTime[i] > 1800000);
                 rows[count].id = i;
                 rows[count].sortMode = (m == 0) ? 4 : m;
                 // Calcul timp pentru afisare
@@ -872,7 +872,7 @@ void drawPages(const PageContext& ctx) {
                         display.print("- ");
                     }
                     display.print(UNIT_NAMES[uid]);
-                    bool offline = (uid != UNIT_ID - 1) && (now - ctx.lastSeenTime[uid] > 1800000);
+                    bool offline = (ctx.lastSeenTime[uid] > 0) && (now - ctx.lastSeenTime[uid] > 1800000);
                     if (offline) {
                         const char* off = "OFFLINE";
                         uint8_t tw = strlen(off) * 6;

@@ -29,6 +29,7 @@ uint8_t  syncedByUnit    = 0;
 #define RESPAWN_PKT_LEN 7       // [NET][TYPE][UNIT][team][kills_hi][kills_lo][CRC]
 #define BOMB_PKT_LEN    5       // [NET][TYPE][UNIT][team][CRC]
 #define KILLRESET_PKT_LEN 7     // [NET][TYPE][UNIT][winnerTeam][pts_hi][pts_lo][CRC]
+#define HEARTBEAT_PKT_LEN 4     // [NET][TYPE][UNIT][CRC] (bateria e deja in UNIT)
 
 // ============================================================
 // Bit-cursor: scriem/citim cate nbits, MSB-first, pe un buffer
@@ -65,12 +66,23 @@ enum TxState { TX_IDLE, TX_START, TX_SENDING, TX_WAIT_DONE };
 static TxState  txState = TX_IDLE;
 static uint32_t txTimer = 0;
 
+// Heartbeat: keep-alive usor (doar nivelul bateriei, deja in unitByte) trimis la
+// 20-30 min de la ultima transmisie. ORICE alta alerta reseteaza timerul.
+static uint32_t nextHeartbeat = 0;   // 0 = neinitializat
+#define HB_MIN_MS  (20UL * 60000UL)
+#define HB_MAX_MS  (30UL * 60000UL)
+static void heartbeatReschedule() {
+    nextHeartbeat = millis() + HB_MIN_MS + (uint32_t)random(0, (long)(HB_MAX_MS - HB_MIN_MS) + 1);
+    if (nextHeartbeat == 0) nextHeartbeat = 1;   // 0 e rezervat pentru "neinitializat"
+}
+
 static void loraQueueSend(const uint8_t* buf, uint8_t len) {
     if (len > TX_MAX_LEN || txCount >= TX_QUEUE_SIZE) return;
     memcpy(txQueue[txTail], buf, len);
     txQueueLen[txTail] = len;
     txTail = (txTail + 1) % TX_QUEUE_SIZE;
     txCount++;
+    heartbeatReschedule();   // orice transmisie reseteaza timerul de heartbeat
 }
 
 // A doua copie a unei alerte se trimite intr-un SLOT determinist pe baza UNIT_ID,
@@ -121,6 +133,21 @@ static uint8_t unitByte() {
 
 void loraTxUpdate() {
     loraDeferUpdate();
+    // Heartbeat: dupa sincronizare pornim timerul; la expirare trimitem keep-alive
+    if (isSynced) {
+        if (nextHeartbeat == 0) {
+            heartbeatReschedule();
+        } else if ((int32_t)(millis() - nextHeartbeat) >= 0) {
+            uint8_t hb[HEARTBEAT_PKT_LEN];
+            hb[0] = (uint8_t)NETWORK_ID;
+            hb[1] = PKT_HEARTBEAT;
+            hb[2] = unitByte();
+            uint8_t cs = 0;
+            for (uint8_t i = 0; i < HEARTBEAT_PKT_LEN - 1; i++) cs ^= hb[i];
+            hb[HEARTBEAT_PKT_LEN - 1] = cs;
+            loraQueueSendDup(hb, HEARTBEAT_PKT_LEN);   // dubla copie pt fiabilitate; reseteaza timerul
+        }
+    }
     switch (txState) {
         case TX_IDLE:
             if (txCount > 0) { txState = TX_START; txTimer = millis(); }
@@ -142,6 +169,7 @@ void loraTxUpdate() {
         case TX_WAIT_DONE:
             if (digitalRead(PIN_LORA_AUX) == LOW || millis() - txTimer > 2000) {
                 lastSeenTime[UNIT_ID - 1] = millis();   // am transmis -> "ultimul semnal" local (pag.5)
+                heartbeatReschedule();                  // sincronizarea e si ea o transmisie
                 txHead = (txHead + 1) % TX_QUEUE_SIZE; txCount--; txState = TX_IDLE;
             }
             break;
@@ -460,6 +488,7 @@ LoraEvent loraPoll() {
         else if (rxBuf[1] == PKT_RESPAWN)    rxLen = RESPAWN_PKT_LEN;
         else if (rxBuf[1] == PKT_BOMB_PLANT || rxBuf[1] == PKT_BOMB_DEFUSE) rxLen = BOMB_PKT_LEN;
         else if (rxBuf[1] == PKT_KILLRESET) rxLen = KILLRESET_PKT_LEN;
+        else if (rxBuf[1] == PKT_HEARTBEAT) rxLen = HEARTBEAT_PKT_LEN;
         else { rxCount = 0; rxLen = 0; break; }   // tip necunoscut -> resync
     }
         }
@@ -585,6 +614,15 @@ LoraEvent loraPoll() {
         Serial.print("[LORA] KILLRESET de la unit "); Serial.print(u);
         Serial.print(" winner="); Serial.print(loraEvtTeam); Serial.print(" pts="); Serial.println(loraEvtPoints);
         return LORA_EVT_KILLRESET;
+    }
+
+    if (type == PKT_HEARTBEAT) {
+        if (!isSynced) return LORA_EVT_NONE;
+        uint8_t u = rxBuf[2] & 0x0F;
+        if (u == UNIT_ID) return LORA_EVT_NONE;
+        uint8_t batt = (rxBuf[2] >> 4) & 0x07;
+        if (u >= 1 && u <= MAX_UNITS) { globalBattery[u-1] = batt; lastSeenTime[u-1] = millis(); }  // doar tinem unitatea "vie"
+        return LORA_EVT_NONE;   // fara handler in .ino (silentios, ca MODE)
     }
 
     // --- SYNC ---

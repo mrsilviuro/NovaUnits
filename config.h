@@ -59,6 +59,7 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
 #define PKT_BOMB_PLANT  0x0B
 #define PKT_BOMB_DEFUSE 0x0C
 #define PKT_KILLRESET   0x0D
+#define PKT_HEARTBEAT   0x0E
 
 // ============================================================
 // DISPLAY OLED (2.42" SSD1309 condus de libraria SSD1306)
