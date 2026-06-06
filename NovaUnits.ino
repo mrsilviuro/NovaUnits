@@ -282,6 +282,7 @@ void handleActionProgress() {
             myRow().status     = BOMB_ARMED;
             myRow().team       = (Team)(actingTeam + 1);
             myRow().actionTime = now;
+            loraSendBombPlant((uint8_t)(actingTeam + 1));   // anuntam reteaua
             noTone(PIN_BUZZER);
             Serial.print("[BOMB] Amorsata de: ");
             Serial.println(TEAM_NAMES[actingTeam]);
@@ -290,6 +291,7 @@ void handleActionProgress() {
             myRow().team       = TEAM_NEUTRAL;
             myRow().actionTime = now;                 // start cooldown
             myRow().savedPoints[actingTeam] += (int32_t)bombPointsDefuse;
+            loraSendBombDefuse((uint8_t)(actingTeam + 1));   // anuntam reteaua
             noTone(PIN_BUZZER);
             Serial.print("[BOMB] Dezamorsata de: ");
             Serial.println(TEAM_NAMES[actingTeam]);
@@ -335,9 +337,11 @@ void applyGameResume() {
             if (lastPointTick[u] > 0)        lastPointTick[u] += pauseDuration;
         }
     }
-    // bomba locala (arm/cooldown): ajustam actionTime
-    if (myRow().mode == 2 && (myRow().status == BOMB_ARMED || myRow().status == BOMB_COOLDOWN) && myRow().actionTime > 0)
-        myRow().actionTime += pauseDuration;
+    // bombe (toate unitatile, arm/cooldown): ajustam actionTime
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        if (unitTable[u].mode == 2 && (unitTable[u].status == BOMB_ARMED || unitTable[u].status == BOMB_COOLDOWN) && unitTable[u].actionTime > 0)
+            unitTable[u].actionTime += pauseDuration;
+    }
     for (uint8_t i = 0; i < queueCount; i++) {
         uint8_t idx = (queueHead + i) % 100;
         respawnQueue[idx] += pauseDuration;
@@ -526,6 +530,25 @@ void loop() {
             unitTable[loraEvtUnit - 1].kills[ti] = (uint16_t)loraEvtPoints;
             appliedPenalties[ti] += (int32_t)delta * (int32_t)respawnPenaltyPoints;   // necplafonat; afisarea clampeaza la 0
             tone(PIN_BUZZER, 1500, 100);   // beep scurt
+            needsDisplayUpdate = true;
+        }
+    } else if (ev == LORA_EVT_BOMB_PLANT) {
+        if (unitTable[loraEvtUnit - 1].status != BOMB_ARMED) {   // ignoram copia dubla
+            unitTable[loraEvtUnit - 1].mode       = 2;
+            unitTable[loraEvtUnit - 1].status     = BOMB_ARMED;
+            unitTable[loraEvtUnit - 1].team       = (Team)loraEvtTeam;
+            unitTable[loraEvtUnit - 1].actionTime = now;
+            tone(PIN_BUZZER, 1800, 600);
+            needsDisplayUpdate = true;
+        }
+    } else if (ev == LORA_EVT_BOMB_DEFUSE) {
+        if (unitTable[loraEvtUnit - 1].status == BOMB_ARMED) {   // ignoram copia dubla / cursa cu explozia
+            unitTable[loraEvtUnit - 1].status     = BOMB_COOLDOWN;
+            unitTable[loraEvtUnit - 1].team       = TEAM_NEUTRAL;
+            unitTable[loraEvtUnit - 1].actionTime = now;            // start cooldown
+            if (loraEvtTeam >= 1 && loraEvtTeam <= 4)
+                unitTable[loraEvtUnit - 1].savedPoints[loraEvtTeam - 1] += (int32_t)bombPointsDefuse;
+            tone(PIN_BUZZER, 1800, 600);
             needsDisplayUpdate = true;
         }
     }
@@ -720,6 +743,30 @@ void loop() {
         if (now - myRow().actionTime >= cooldownMs) {
             myRow().status = BOMB_IDLE;
             Serial.println("[BOMB] Cooldown terminat.");
+        }
+    }
+
+    // Bombe de pe ALTE unitati: explozie + cooldown autonom (doar tabel + scor, fara efecte locale)
+    if (!isGamePaused && !isTimeOut) {
+        for (uint8_t u = 0; u < MAX_UNITS; u++) {
+            if (u == UNIT_ID - 1 || unitTable[u].mode != 2) continue;
+            if (unitTable[u].status == BOMB_ARMED) {
+                if (unitTable[u].actionTime != 0 && now >= unitTable[u].actionTime &&
+                    now - unitTable[u].actionTime >= bombTimerMs) {     // EXPLOZIE autonoma
+                        Team by = unitTable[u].team;
+                        unitTable[u].status     = BOMB_COOLDOWN;
+                        unitTable[u].team       = TEAM_NEUTRAL;
+                        unitTable[u].actionTime = now;                       // start cooldown
+                        if (by != TEAM_NEUTRAL) unitTable[u].savedPoints[by - 1] += (int32_t)bombPointsExplode;
+                        needsDisplayUpdate = true;
+                    }
+            } else if (unitTable[u].status == BOMB_COOLDOWN) {
+                if (unitTable[u].actionTime != 0 && now >= unitTable[u].actionTime &&
+                    now - unitTable[u].actionTime >= cooldownMs) {
+                    unitTable[u].status = BOMB_IDLE;
+                needsDisplayUpdate = true;
+                    }
+            }
         }
     }
 

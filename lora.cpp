@@ -27,6 +27,7 @@ uint8_t  syncedByUnit    = 0;
 #define CAPTURE_PKT_LEN 5       // [NET][TYPE][UNIT][team][CRC]
 #define NEUT_PKT_LEN    7       // [NET][TYPE][UNIT][team][pts_hi][pts_lo][CRC]
 #define RESPAWN_PKT_LEN 7       // [NET][TYPE][UNIT][team][kills_hi][kills_lo][CRC]
+#define BOMB_PKT_LEN    5       // [NET][TYPE][UNIT][team][CRC]
 
 // ============================================================
 // Bit-cursor: scriem/citim cate nbits, MSB-first, pe un buffer
@@ -383,6 +384,34 @@ void loraSendRespawn(uint8_t team, uint16_t totalKills) {
     Serial.print(" totalKills="); Serial.println(totalKills);
 }
 
+void loraSendBombPlant(uint8_t team) {
+    if (!isSynced) return;
+    uint8_t buf[BOMB_PKT_LEN];
+    buf[0] = (uint8_t)NETWORK_ID;
+    buf[1] = PKT_BOMB_PLANT;
+    buf[2] = unitByte();
+    buf[3] = team;
+    uint8_t cs = 0;
+    for (uint8_t i = 0; i < BOMB_PKT_LEN - 1; i++) cs ^= buf[i];
+    buf[BOMB_PKT_LEN - 1] = cs;
+    loraQueueSendDup(buf, BOMB_PKT_LEN);
+    Serial.print("[LORA] BOMB PLANT pus in coada, team="); Serial.println(team);
+}
+
+void loraSendBombDefuse(uint8_t team) {
+    if (!isSynced) return;
+    uint8_t buf[BOMB_PKT_LEN];
+    buf[0] = (uint8_t)NETWORK_ID;
+    buf[1] = PKT_BOMB_DEFUSE;
+    buf[2] = unitByte();
+    buf[3] = team;
+    uint8_t cs = 0;
+    for (uint8_t i = 0; i < BOMB_PKT_LEN - 1; i++) cs ^= buf[i];
+    buf[BOMB_PKT_LEN - 1] = cs;
+    loraQueueSendDup(buf, BOMB_PKT_LEN);
+    Serial.print("[LORA] BOMB DEFUSE pus in coada, team="); Serial.println(team);
+}
+
 // ============================================================
 // loraPoll() — citeste UART; intoarce evenimentul primit
 // ============================================================
@@ -411,6 +440,7 @@ LoraEvent loraPoll() {
         else if (rxBuf[1] == PKT_CAPTURE)    rxLen = CAPTURE_PKT_LEN;
         else if (rxBuf[1] == PKT_NEUTRALIZE) rxLen = NEUT_PKT_LEN;
         else if (rxBuf[1] == PKT_RESPAWN)    rxLen = RESPAWN_PKT_LEN;
+        else if (rxBuf[1] == PKT_BOMB_PLANT || rxBuf[1] == PKT_BOMB_DEFUSE) rxLen = BOMB_PKT_LEN;
         else { rxCount = 0; rxLen = 0; break; }   // tip necunoscut -> resync
     }
         }
@@ -509,6 +539,19 @@ LoraEvent loraPoll() {
         loraEvtPoints = ((int32_t)rxBuf[4] << 8) | rxBuf[5];   // total curent kill-uri
         Serial.print("[LORA] RESPAWN de la unit "); Serial.print(u); Serial.print(" totalKills="); Serial.println(loraEvtPoints);
         return LORA_EVT_RESPAWN;
+    }
+
+    if (type == PKT_BOMB_PLANT || type == PKT_BOMB_DEFUSE) {
+        if (!isSynced) return LORA_EVT_NONE;
+        uint8_t u = rxBuf[2] & 0x0F;
+        if (u == UNIT_ID) return LORA_EVT_NONE;
+        uint8_t batt = (rxBuf[2] >> 4) & 0x07;
+        if (u >= 1 && u <= MAX_UNITS) { globalBattery[u-1] = batt; lastSeenTime[u-1] = millis(); }
+        loraEvtUnit = u;
+        loraEvtTeam = rxBuf[3];
+        Serial.print("[LORA] BOMB "); Serial.print(type == PKT_BOMB_PLANT ? "PLANT" : "DEFUSE");
+        Serial.print(" de la unit "); Serial.println(u);
+        return (type == PKT_BOMB_PLANT) ? LORA_EVT_BOMB_PLANT : LORA_EVT_BOMB_DEFUSE;
     }
 
     // --- SYNC ---
