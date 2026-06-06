@@ -358,6 +358,9 @@ void applyTimerAction(uint8_t action) {
     if (action == 0) {            // START
         isGameTimerRunning = true;
         lastTimerTick = millis();
+        digitalWrite(PIN_RELAY, LOW);          // alarma 3s la start (emitator + receptoare)
+        isRelayActive = true;
+        relayTurnOffTime = millis() + 3000;
         Serial.println("[GAME] START!");
     } else if (action == 1) {     // PAUSE
         applyGamePause();
