@@ -490,14 +490,21 @@ uint16_t buildExportBlob(uint8_t* b) {
     b[p++] = (uint8_t)conquestWinner;
     // referinta de timp pentru durata tinuta (frozen pe pauza)
     uint32_t ref = isGamePaused ? pauseStartTime : millis();
-    // unitTable[12]: 15 octeti/unitate
+    // faza timerului de joc (ms in secunda curenta) -> aliniere countdown pe unitatea noua
+    uint32_t tphRaw = ((int32_t)(ref - lastTimerTick) > 0) ? (ref - lastTimerTick) : 0;
+    uint16_t timerPhase = (tphRaw > 65535) ? 65535 : (uint16_t)tphRaw;
+    b[p++] = (timerPhase >> 8) & 0xFF;
+    b[p++] =  timerPhase       & 0xFF;
+    // unitTable[12]
     for (uint8_t u = 0; u < MAX_UNITS; u++) {
         UnitRow& r = unitTable[u];
         b[p++] = (r.mode & 0x03) | ((r.status & 0x03) << 2) | (((uint8_t)r.team & 0x07) << 4);
-        uint16_t held = 0;
-        if (r.actionTime > 0 && ref > r.actionTime) held = (uint16_t)((ref - r.actionTime) / 1000);
-        b[p++] = (held >> 8) & 0xFF;
-        b[p++] =  held       & 0xFF;
+        uint32_t heldMs = 0;
+        if (r.actionTime > 0 && (int32_t)(ref - r.actionTime) > 0) heldMs = ref - r.actionTime;
+        b[p++] = (heldMs >> 24) & 0xFF;
+        b[p++] = (heldMs >> 16) & 0xFF;
+        b[p++] = (heldMs >> 8)  & 0xFF;
+        b[p++] =  heldMs        & 0xFF;
         for (uint8_t t = 0; t < 4; t++) {
             int16_t sp = (int16_t)r.savedPoints[t];
             b[p++] = (sp >> 8) & 0xFF;
@@ -548,10 +555,11 @@ bool applyImportBlob(const uint8_t* b, uint16_t len) {
     isGamePaused       = (flags & 0x02) != 0;
     isTimeOut          = (flags & 0x04) != 0;
     conquestWinner     = (Team)b[p++];
+    uint16_t timerPhase = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
 
     uint32_t now = millis();
     if (isGamePaused) pauseStartTime = now;
-    lastTimerTick = now;
+    lastTimerTick = now - timerPhase;        // aliniem faza countdown-ului cu reteaua
     uint32_t ref = now;   // pauseStartTime == now cand suntem pe pauza
 
     // unitTable[12]
@@ -560,7 +568,7 @@ bool applyImportBlob(const uint8_t* b, uint16_t len) {
         unitTable[u].mode   = packed & 0x03;
         unitTable[u].status = (packed >> 2) & 0x03;
         unitTable[u].team   = (Team)((packed >> 4) & 0x07);
-        uint16_t heldSec = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
+        uint32_t heldMs = ((uint32_t)b[p] << 24) | ((uint32_t)b[p + 1] << 16) | ((uint32_t)b[p + 2] << 8) | b[p + 3]; p += 4;
         for (uint8_t t = 0; t < 4; t++) {
             uint16_t raw = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
             unitTable[u].savedPoints[t] = (int32_t)(int16_t)raw;
@@ -571,11 +579,10 @@ bool applyImportBlob(const uint8_t* b, uint16_t len) {
         liveCapture[u] = (int32_t)(int16_t)lcraw;
 
         // reconstructie timpi (relativ la ceasul local)
-        uint32_t heldMs = (uint32_t)heldSec * 1000;
         bool sectorCap  = (unitTable[u].mode == 1 && unitTable[u].status == SEC_CAPTURED && unitTable[u].team != TEAM_NEUTRAL);
         bool bombActive = (unitTable[u].mode == 2 && (unitTable[u].status == BOMB_ARMED || unitTable[u].status == BOMB_COOLDOWN));
         if (sectorCap || bombActive) {
-            unitTable[u].actionTime = (ref > heldMs) ? (ref - heldMs) : ref;
+            unitTable[u].actionTime = ref - heldMs;   // poate subcurge pe unitate proaspat pornita -> revine corect prin wraparound la (now - actionTime)
             lastPointTick[u] = sectorCap ? (unitTable[u].actionTime + (heldMs / 10000) * 10000) : 0;
         } else {
             unitTable[u].actionTime = 0;
@@ -887,7 +894,8 @@ void loop() {
                     // +5s (jumatate de tick): pragul de bonus (15min) cade fix pe o granita de tick;
                     // un decalaj de ~1ms intre actionTime si now facea minutesHeld sa fie 14 in loc de 15
                     // pe unele unitati -> pierdeau o treapta de bonus. Evaluam la mijlocul intervalului.
-                    uint32_t heldMs = (now > unitTable[u].actionTime) ? (now - unitTable[u].actionTime) : 0;
+                    int32_t  heldDiff = (int32_t)(now - unitTable[u].actionTime);   // wraparound-safe (actionTime poate fi 'subcurs' dupa import)
+                    uint32_t heldMs = (heldDiff > 0) ? (uint32_t)heldDiff : 0;
                     uint32_t minutesHeld = (heldMs + 5000) / 60000;
                     uint32_t bonus = (bonusIntervalMinutes > 0) ? (minutesHeld / bonusIntervalMinutes) : 0;
                     if (bonus > 3) bonus = 3;
@@ -989,8 +997,8 @@ void loop() {
         for (uint8_t u = 0; u < MAX_UNITS; u++) {
             if (u == UNIT_ID - 1 || unitTable[u].mode != 2) continue;
             if (unitTable[u].status == BOMB_ARMED) {
-                if (unitTable[u].actionTime != 0 && now >= unitTable[u].actionTime &&
-                    now - unitTable[u].actionTime >= bombTimerMs) {     // EXPLOZIE autonoma
+                if (unitTable[u].actionTime != 0 &&
+                    (int32_t)(now - unitTable[u].actionTime) >= (int32_t)bombTimerMs) {     // EXPLOZIE autonoma
                         Team by = unitTable[u].team;
                         unitTable[u].status     = BOMB_COOLDOWN;
                         unitTable[u].team       = TEAM_NEUTRAL;
@@ -999,8 +1007,8 @@ void loop() {
                         needsDisplayUpdate = true;
                     }
             } else if (unitTable[u].status == BOMB_COOLDOWN) {
-                if (unitTable[u].actionTime != 0 && now >= unitTable[u].actionTime &&
-                    now - unitTable[u].actionTime >= cooldownMs) {
+                if (unitTable[u].actionTime != 0 &&
+                    (int32_t)(now - unitTable[u].actionTime) >= (int32_t)cooldownMs) {
                     unitTable[u].status = BOMB_IDLE;
                 needsDisplayUpdate = true;
                     }

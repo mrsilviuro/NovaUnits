@@ -743,7 +743,8 @@ void drawPages(const PageContext& ctx) {
                 bool hasTime = false;
                 if (ctx.globalEventTime[i] > 0) {
                     uint32_t refNow = ctx.isGamePaused ? ctx.pauseStartTime : (ctx.isTimeOut ? ctx.gameOverTime : now);
-                    uint32_t el = (refNow > ctx.globalEventTime[i]) ? (refNow - ctx.globalEventTime[i]) / 1000 : 0;
+                    int32_t  elDiff = (int32_t)(refNow - ctx.globalEventTime[i]);   // wraparound-safe (timp 'subcurs' dupa import)
+                    uint32_t el = (elDiff > 0) ? ((uint32_t)elDiff) / 1000 : 0;
                     uint32_t tgt = 0;
                     bool active = true;
                     if (m == 1 && t != TEAM_NEUTRAL) {
