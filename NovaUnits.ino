@@ -385,6 +385,7 @@ void applyTimerAction(uint8_t action) {
     } else if (action == 3) {     // RESET CEAS
         gameTimeLeftSeconds = gameTimeLimitSeconds;
         isGameTimerRunning  = false;
+        isGamePaused        = false;   // dupa reset oferim START direct, nu RESUME
         isTimeOut           = false;
         lastTimerTick       = millis();
         Serial.println("[GAME] Ceas resetat la timpul initial!");
@@ -524,7 +525,10 @@ void loop() {
         currentState != STATE_SYNCED && currentState != STATE_SYNC_DONE) {
         LoraEvent ev = loraPoll();
     if (ev == LORA_EVT_SYNC) {
-        syncReturnState = currentState;   // de unde am venit (revenire daca nu e mod)
+        // de unde am venit (revenire daca nu e mod); daca eram pe avertismentul de
+        // nesincronizare, dupa SYNCED ne intoarcem la selectia de mod (warning-ul nu mai
+        // are sens, unitatea e acum sincronizata)
+        syncReturnState = (currentState == STATE_MODE_WARNING) ? STATE_MENU : currentState;
         syncedScreenStart = now;
         currentState = STATE_SYNCED;
         needsDisplayUpdate = true;
