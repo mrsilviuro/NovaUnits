@@ -85,6 +85,7 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
   { 0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6 }
 #define RFID_MAGIC_BYTE 0x4E
 #define RFID_BLOCK_ADDR 4
+#define STATE_BLOB_VERSION 0x01   // versiune format export/import card
 
 // ============================================================
 // ECHIPE & UNITATI
@@ -126,6 +127,8 @@ enum GameState : uint8_t {
   STATE_ADMIN_SAVED,
   STATE_EXPIMP_MENU,
   STATE_EXPIMP_WAIT,
+  STATE_EXPORT_WAIT,
+  STATE_EXPORT_DONE,
   STATE_ADMIN_TAG_WRITE,
   STATE_WAIT_ADMIN_TAG,
   STATE_LOADING,

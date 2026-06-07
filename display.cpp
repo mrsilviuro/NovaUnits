@@ -1015,7 +1015,7 @@ void drawExpImpMenu(uint8_t index) {
     display.setTextSize(1);
     uint8_t x;
     // Titlu + linie (ca pe celelalte sub-pagini)
-    const char* title = "Exp. / Imp. Data";
+    const char* title = "Imp. / Exp. Data";
     x = (SCREEN_WIDTH - strlen(title) * 6) / 2;
     display.setCursor(x, 0); display.print(title);
     display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
@@ -1049,6 +1049,31 @@ void drawExpImpWait() {
     uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
     display.setCursor(x, 28);
     display.print(l1);
+    display.display();
+}
+
+void drawExportWait() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "Place admin card";
+    uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
+    display.setCursor(x, 20); display.print(l1);
+    const char* l2 = "to export ...";
+    x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
+    display.setCursor(x, 32); display.print(l2);
+    const char* l3 = "RED: cancel";
+    x = (SCREEN_WIDTH - strlen(l3) * 6) / 2;
+    display.setCursor(x, 54); display.print(l3);
+    display.display();
+}
+
+void drawExportDone(const char* l1, const char* l2) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
+    display.setCursor(x, 24); display.print(l1);
+    x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
+    display.setCursor(x, 36); display.print(l2);
     display.display();
 }
 

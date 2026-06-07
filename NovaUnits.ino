@@ -47,6 +47,11 @@ bool     latchPulsing   = false;
 uint8_t   adminMenuIndex    = 0;
 uint8_t   adminScrollIndex  = 0;
 uint8_t   expImpIndex       = 0;   // 0=Export, 1=Import (sub-meniu Exp./Imp. Data)
+uint8_t    stateBlob[256];          // buffer serializare stare joc (export/import card)
+uint16_t   stateBlobLen     = 0;
+const char* exportResL1     = "";   // mesaj rezultat export (linia 1/2)
+const char* exportResL2     = "";
+uint32_t   exportDoneStart  = 0;
 uint8_t   adminSelectedPage = 0;
 uint32_t  adminSavedTime    = 0;
 GameState previousStateBeforeAdmin = STATE_MENU;
@@ -448,6 +453,65 @@ void doReboot() {
     while (millis() - t < 1500) { loraTxUpdate(); }  // pompam coada (iese RESTART) inainte de restart
     noTone(PIN_BUZZER);
     ESP.restart();
+}
+
+// ============================================================
+// crc16() / buildExportBlob() — serializare stare joc pentru card
+// ============================================================
+static uint16_t crc16(const uint8_t* data, uint16_t len) {
+    uint16_t crc = 0xFFFF;
+    for (uint16_t i = 0; i < len; i++) {
+        crc ^= (uint16_t)data[i] << 8;
+        for (uint8_t bit = 0; bit < 8; bit++)
+            crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+    }
+    return crc;
+}
+
+uint16_t buildExportBlob(uint8_t* b) {
+    uint16_t p = 0;
+    b[p++] = RFID_MAGIC_BYTE;
+    b[p++] = STATE_BLOB_VERSION;
+    // setari (indici bruti)
+    b[p++] = gsTimeLimit;  b[p++] = gsWinCond;  b[p++] = gsActionIdx;  b[p++] = gsBonus;
+    b[p++] = bsTimerIdx;   b[p++] = bsCooldownIdx;  b[p++] = bsExpPtsIdx;  b[p++] = bsDefPtsIdx;
+    b[p++] = rsTimeIdx;    b[p++] = rsPenaltyIdx;
+    b[p++] = rsLimitIdx[0]; b[p++] = rsLimitIdx[1]; b[p++] = rsLimitIdx[2]; b[p++] = rsLimitIdx[3];
+    // flux joc
+    b[p++] = (gameTimeLeftSeconds >> 8) & 0xFF;
+    b[p++] =  gameTimeLeftSeconds       & 0xFF;
+    uint8_t flags = (isGameTimerRunning ? 0x01 : 0) | (isGamePaused ? 0x02 : 0) | (isTimeOut ? 0x04 : 0);
+    b[p++] = flags;
+    b[p++] = (uint8_t)conquestWinner;
+    // referinta de timp pentru durata tinuta (frozen pe pauza)
+    uint32_t ref = isGamePaused ? pauseStartTime : millis();
+    // unitTable[12]: 15 octeti/unitate
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        UnitRow& r = unitTable[u];
+        b[p++] = (r.mode & 0x03) | ((r.status & 0x03) << 2) | (((uint8_t)r.team & 0x07) << 4);
+        uint16_t held = 0;
+        if (r.actionTime > 0 && ref > r.actionTime) held = (uint16_t)((ref - r.actionTime) / 1000);
+        b[p++] = (held >> 8) & 0xFF;
+        b[p++] =  held       & 0xFF;
+        for (uint8_t t = 0; t < 4; t++) {
+            int16_t sp = (int16_t)r.savedPoints[t];
+            b[p++] = (sp >> 8) & 0xFF;
+            b[p++] =  sp       & 0xFF;
+        }
+        for (uint8_t t = 0; t < 4; t++)
+            b[p++] = (r.kills[t] > 255) ? 255 : (uint8_t)r.kills[t];
+    }
+    // penalizari globale
+    for (uint8_t t = 0; t < 4; t++) {
+        int16_t ap = (int16_t)appliedPenalties[t];
+        b[p++] = (ap >> 8) & 0xFF;
+        b[p++] =  ap       & 0xFF;
+    }
+    // CRC16 peste tot ce am scris pana acum
+    uint16_t crc = crc16(b, p);
+    b[p++] = (crc >> 8) & 0xFF;
+    b[p++] =  crc       & 0xFF;
+    return p;
 }
 
 void setup() {
@@ -1160,6 +1224,41 @@ void loop() {
             handleButtons();
             break;
 
+        case STATE_EXPORT_WAIT:
+            if (needsDisplayUpdate) { drawExportWait(); needsDisplayUpdate = false; }
+            handleButtons();   // ROSU = cancel
+            if (currentState == STATE_EXPORT_WAIT && millis() - lastRfidRead >= 150) {
+                lastRfidRead = millis();
+                RfidExportResult er = rfidExportState(stateBlob, stateBlobLen);
+                if (er == EXPORT_OK) {
+                    exportResL1 = "Export"; exportResL2 = "OK";
+                    currentState = STATE_EXPORT_DONE; exportDoneStart = millis();
+                    needsDisplayUpdate = true; tone(PIN_BUZZER, 1800, 400);
+                    rfidIgnoreUntil = millis() + 2000;
+                } else if (er == EXPORT_NOT_ADMIN) {
+                    exportResL1 = "Not an"; exportResL2 = "admin card";
+                    currentState = STATE_EXPORT_DONE; exportDoneStart = millis();
+                    needsDisplayUpdate = true; tone(PIN_BUZZER, 200, 400);
+                    rfidIgnoreUntil = millis() + 2000;
+                } else if (er == EXPORT_WRITE_FAIL) {
+                    exportResL1 = "Export"; exportResL2 = "FAILED";
+                    currentState = STATE_EXPORT_DONE; exportDoneStart = millis();
+                    needsDisplayUpdate = true; tone(PIN_BUZZER, 200, 400);
+                    rfidIgnoreUntil = millis() + 2000;
+                }
+                // EXPORT_NO_TAG -> ramanem in asteptare
+            }
+            break;
+
+        case STATE_EXPORT_DONE:
+            if (needsDisplayUpdate) { drawExportDone(exportResL1, exportResL2); needsDisplayUpdate = false; }
+            if (millis() - exportDoneStart >= 2000) {
+                expImpIndex = 0;
+                currentState = STATE_EXPIMP_MENU;
+                needsDisplayUpdate = true;
+            }
+            break;
+
         case STATE_ADMIN_MENU:
             if (needsDisplayUpdate) {
                 drawAdminMenu(adminMenuIndex, adminScrollIndex, selectedMode);
@@ -1595,8 +1694,11 @@ void onShortPress(uint8_t btnIndex) {
             needsDisplayUpdate = true;
         } else if (btnIndex == 3) {     // GALBEN — select
             if (expImpIndex == 0) {
-                // EXPORT DATA -> logica de export se adauga in pasul urmator
-                Serial.println("[EXP/IMP] Export Data selectat");
+                // EXPORT DATA -> construim blob-ul (stare inghetata pe pauza) si asteptam cardul
+                stateBlobLen = buildExportBlob(stateBlob);
+                lastRfidRead = millis();
+                currentState = STATE_EXPORT_WAIT;
+                needsDisplayUpdate = true;
                 tone(PIN_BUZZER, 1000, 80);
             } else {
                 // IMPORT DATA -> logica de import se adauga in pasul urmator
@@ -1605,6 +1707,13 @@ void onShortPress(uint8_t btnIndex) {
             }
         } else if (btnIndex == 0) {     // ROSU — inapoi la meniul admin
             currentState = STATE_ADMIN_MENU;
+            needsDisplayUpdate = true;
+        }
+
+    } else if (currentState == STATE_EXPORT_WAIT) {
+        if (btnIndex == 0) {            // ROSU — anulare, inapoi la sub-meniu
+            expImpIndex = 0;
+            currentState = STATE_EXPIMP_MENU;
             needsDisplayUpdate = true;
         }
 
