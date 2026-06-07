@@ -52,6 +52,7 @@ uint16_t   stateBlobLen     = 0;
 const char* exportResL1     = "";   // mesaj rezultat export (linia 1/2)
 const char* exportResL2     = "";
 uint32_t   exportDoneStart  = 0;
+uint32_t   exportWaitStart  = 0;   // start fereastra de 3s 'pune cardul' (export)
 uint8_t   adminSelectedPage = 0;
 uint32_t  adminSavedTime    = 0;
 GameState previousStateBeforeAdmin = STATE_MENU;
@@ -1226,8 +1227,15 @@ void loop() {
 
         case STATE_EXPORT_WAIT:
             if (needsDisplayUpdate) { drawExportWait(); needsDisplayUpdate = false; }
-            handleButtons();   // ROSU = cancel
-            if (currentState == STATE_EXPORT_WAIT && millis() - lastRfidRead >= 150) {
+            // 3s fara card -> ton de fail si back singur la sub-meniu
+            if (millis() - exportWaitStart >= 3000) {
+                tone(PIN_BUZZER, 200, 400);
+                expImpIndex = 0;
+                currentState = STATE_EXPIMP_MENU;
+                needsDisplayUpdate = true;
+                break;
+            }
+            if (millis() - lastRfidRead >= 150) {
                 lastRfidRead = millis();
                 RfidExportResult er = rfidExportState(stateBlob, stateBlobLen);
                 if (er == EXPORT_OK) {
@@ -1697,6 +1705,7 @@ void onShortPress(uint8_t btnIndex) {
                 // EXPORT DATA -> construim blob-ul (stare inghetata pe pauza) si asteptam cardul
                 stateBlobLen = buildExportBlob(stateBlob);
                 lastRfidRead = millis();
+                exportWaitStart = millis();
                 currentState = STATE_EXPORT_WAIT;
                 needsDisplayUpdate = true;
                 tone(PIN_BUZZER, 1000, 80);
@@ -1710,14 +1719,7 @@ void onShortPress(uint8_t btnIndex) {
             needsDisplayUpdate = true;
         }
 
-    } else if (currentState == STATE_EXPORT_WAIT) {
-        if (btnIndex == 0) {            // ROSU — anulare, inapoi la sub-meniu
-            expImpIndex = 0;
-            currentState = STATE_EXPIMP_MENU;
-            needsDisplayUpdate = true;
-        }
-
-    } else if (currentState == STATE_ADMIN_PAGES) {
+   } else if (currentState == STATE_ADMIN_PAGES) {
         if (btnIndex == 0) {            // ROSU — inapoi la meniu admin
             currentState = STATE_ADMIN_MENU;
             needsDisplayUpdate = true;

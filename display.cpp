@@ -1061,9 +1061,6 @@ void drawExportWait() {
     const char* l2 = "to export ...";
     x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
     display.setCursor(x, 32); display.print(l2);
-    const char* l3 = "RED: cancel";
-    x = (SCREEN_WIDTH - strlen(l3) * 6) / 2;
-    display.setCursor(x, 54); display.print(l3);
     display.display();
 }
 
