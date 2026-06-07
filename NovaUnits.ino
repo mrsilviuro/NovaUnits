@@ -244,7 +244,19 @@ void handleActionProgress() {
     uint32_t now = millis();
     uint32_t elapsed = now - actionStartTime;
 
-    // 0. Dezamorsam, dar bomba a explodat intre timp -> BOOM
+    // 0. Joc terminat (TIME OUT / conquest) sau pus pe pauza -> taiem butonul (anulam actiunea)
+    if (isTimeOut || isGamePaused) {
+        currentAction = ACT_NONE;
+        currentState  = STATE_PAGES;
+        currentPage   = 0;
+        needsDisplayUpdate = true;
+        tone(PIN_BUZZER, 300, 300);
+        refreshLEDs();
+        Serial.println("[ACTION] Anulat - joc terminat sau pauza.");
+        return;
+    }
+
+    // 0b. Dezamorsam, dar bomba a explodat intre timp -> BOOM
     if (currentAction == ACT_DEFUSE && myRow().status != BOMB_ARMED) {
         currentAction = ACT_NONE;
         currentState = STATE_BOOM;
@@ -1075,6 +1087,10 @@ void loop() {
             }
             break;
 
+        case STATE_MODE_WARNING:
+            if (needsDisplayUpdate) { drawModeWarningScreen(); needsDisplayUpdate = false; }
+            handleButtons();
+            break;
         case STATE_SYNC_WARNING:
             if (needsDisplayUpdate) { drawSyncWarningScreen(); needsDisplayUpdate = false; }
             handleButtons();
@@ -1220,6 +1236,25 @@ void loop() {
 // CALLBACKS BUTOANE
 // ============================================================
 
+// ============================================================
+// applySelectedMode() — aplica modul ales in meniu (folosit si dupa
+// confirmarea avertismentului "unitate nesincronizata")
+// ============================================================
+void applySelectedMode() {
+    selectedMode = menuIndex;
+    myRow().mode = (selectedMode == 0) ? 1 : (selectedMode == 1) ? 2 : 3;
+    if (selectedMode == 2) {
+        currentState = STATE_RESPAWN_SETUP;
+    } else {
+        loraSendMode(myRow().mode, 0);   // anuntam reteaua (sector/bomba)
+        currentState = STATE_LOADING;
+        loadingStartTime = millis();
+    }
+    needsDisplayUpdate = true;
+    Serial.print("[MENU] Mod selectat: ");
+    Serial.println(selectedMode);
+}
+
 void onShortPress(uint8_t btnIndex) {
     tone(PIN_BUZZER, 800, 30);
     resetActivity();
@@ -1230,19 +1265,15 @@ void onShortPress(uint8_t btnIndex) {
             if (menuIndex > 2) menuIndex = 0;
             needsDisplayUpdate = true;
         } else if (btnIndex == 3) {     // GALBEN — confirm
-            selectedMode = menuIndex;
-            myRow().mode = (selectedMode == 0) ? 1 : (selectedMode == 1) ? 2 : 3;
-            if (selectedMode == 2) {
-                currentState = STATE_RESPAWN_SETUP;
+            if (!isSynced) {
+                // unitate nesincronizata -> avertizam adminul intai;
+                // aplicam modul abia dupa confirmare (BLUE) in STATE_MODE_WARNING
+                currentState = STATE_MODE_WARNING;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 1000, 50);
             } else {
-                loraSendMode(myRow().mode, 0);   // anuntam reteaua (sector/bomba)
-                currentState = STATE_LOADING;
-                loadingStartTime = millis();
+                applySelectedMode();
             }
-            needsDisplayUpdate = true;
-            Serial.print("[MENU] Mod selectat: ");
-            Serial.println(selectedMode);
-            // (alerta LoRa EVT_MODE_* se adauga in Faza 2)
         }
 
     } else if (currentState == STATE_RESPAWN_SETUP) {
@@ -1404,6 +1435,15 @@ void onShortPress(uint8_t btnIndex) {
         } else if (btnIndex == 1) {     // BLUE — confirma sincronizarea
             currentState = STATE_SYNCING;
             needsDisplayUpdate = true;
+        }
+    }
+
+    else if (currentState == STATE_MODE_WARNING) {
+        if (btnIndex == 0) {            // RED — Back, inapoi la selectia de mod
+            currentState = STATE_MENU;
+            needsDisplayUpdate = true;
+        } else if (btnIndex == 1) {     // BLUE — Yes, aplicam modul nesincronizat
+            applySelectedMode();
         }
     }
 
