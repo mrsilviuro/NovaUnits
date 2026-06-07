@@ -7,7 +7,7 @@
 // ============================================================
 // IDENTITATE UNITATE  — se schimba per unitate inainte de upload
 // ============================================================
-#define UNIT_ID 4
+#define UNIT_ID 2
 #define NETWORK_ID 0x4E      // 1 octet, marker+filtru retea (schimba per lot de unitati)
 #define MAX_UNITS 12
 
@@ -124,6 +124,8 @@ enum GameState : uint8_t {
   STATE_ADMIN_MENU,
   STATE_ADMIN_PAGES,
   STATE_ADMIN_SAVED,
+  STATE_EXPIMP_MENU,
+  STATE_EXPIMP_WAIT,
   STATE_ADMIN_TAG_WRITE,
   STATE_WAIT_ADMIN_TAG,
   STATE_LOADING,

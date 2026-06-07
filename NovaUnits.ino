@@ -46,6 +46,7 @@ bool     latchPulsing   = false;
 // --- Admin ---
 uint8_t   adminMenuIndex    = 0;
 uint8_t   adminScrollIndex  = 0;
+uint8_t   expImpIndex       = 0;   // 0=Export, 1=Import (sub-meniu Exp./Imp. Data)
 uint8_t   adminSelectedPage = 0;
 uint32_t  adminSavedTime    = 0;
 GameState previousStateBeforeAdmin = STATE_MENU;
@@ -1145,6 +1146,20 @@ void loop() {
             }
             break;
 
+        case STATE_EXPIMP_WAIT:
+            if (needsDisplayUpdate) { drawExpImpWait(); needsDisplayUpdate = false; }
+            if ((uint32_t)(millis() - pauseStartTime) >= 15000) {   // s-au scurs cele 15s -> deschidem meniul
+                expImpIndex = 0;
+                currentState = STATE_EXPIMP_MENU;
+                needsDisplayUpdate = true;
+            }
+            break;
+
+        case STATE_EXPIMP_MENU:
+            if (needsDisplayUpdate) { drawExpImpMenu(expImpIndex); needsDisplayUpdate = false; }
+            handleButtons();
+            break;
+
         case STATE_ADMIN_MENU:
             if (needsDisplayUpdate) {
                 drawAdminMenu(adminMenuIndex, adminScrollIndex, selectedMode);
@@ -1454,19 +1469,19 @@ void onShortPress(uint8_t btnIndex) {
     else if (currentState == STATE_ADMIN_MENU) {
         if (btnIndex == 2) {            // VERDE — scroll jos
             adminMenuIndex++;
-            if (adminMenuIndex == 5 && selectedMode == -1) adminMenuIndex++;
-            if (adminMenuIndex >= 8) {
+            if (adminMenuIndex == 6 && selectedMode == -1) adminMenuIndex++;
+            if (adminMenuIndex >= 9) {
                 adminMenuIndex = 0;
                 adminScrollIndex = 0;
             } else {
                 uint8_t vis = 0;
                 for (uint8_t i = adminScrollIndex; i <= adminMenuIndex; i++) {
-                    if (i == 5 && selectedMode == -1) continue;
+                    if (i == 6 && selectedMode == -1) continue;
                     vis++;
                 }
                 while (vis > 5) {
                     adminScrollIndex++;
-                    if (adminScrollIndex == 4 && selectedMode == -1) adminScrollIndex++;
+                    if (adminScrollIndex == 6 && selectedMode == -1) adminScrollIndex++;
                     vis--;
                 }
             }
@@ -1489,6 +1504,24 @@ void onShortPress(uint8_t btnIndex) {
                     tone(PIN_BUZZER, 1000, 50);
                 }
             } else if (adminMenuIndex == 5) {
+                // EXP. / IMP. DATA — blocat cat timp jocul ruleaza
+                if (gameActive) {
+                    blockMsgStart = millis();
+                    currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else if (isGamePaused && (uint32_t)(millis() - pauseStartTime) < 15000) {
+                    // pe pauza de < 15s -> asteptam sa primim eventualele kill-uri respawn (trimise la 15s)
+                    currentState = STATE_EXPIMP_WAIT;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1000, 50);
+                } else {
+                    expImpIndex = 0;
+                    currentState = STATE_EXPIMP_MENU;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1000, 50);
+                }
+            } else if (adminMenuIndex == 6) {
                 // CHANGE MODE — blocat daca jocul ruleaza / sector cucerit / bomba armata / queue respawn
                 bool changeBlocked = gameActive
                 || (myRow().mode == 1 && myRow().status == SEC_CAPTURED)
@@ -1522,11 +1555,11 @@ void onShortPress(uint8_t btnIndex) {
                     needsDisplayUpdate = true;
                     tone(PIN_BUZZER, 1000, 300);
                 }
-            } else if (adminMenuIndex == 6) {
+            } else if (adminMenuIndex == 7) {
                 // SYSTEM RESTART — anuntam reteaua, apoi reboot
                 loraSendRestart();
                 doReboot();
-            } else if (adminMenuIndex == 7) {
+            } else if (adminMenuIndex == 8) {
                 // POWER OFF
                 currentState = STATE_POWER_OFF;
                 powerOffStart = millis();
@@ -1553,6 +1586,25 @@ void onShortPress(uint8_t btnIndex) {
 
         } else if (btnIndex == 0) {     // ROSU — inapoi la joc
             currentState = previousStateBeforeAdmin;
+            needsDisplayUpdate = true;
+        }
+
+    } else if (currentState == STATE_EXPIMP_MENU) {
+        if (btnIndex == 2) {            // VERDE — scroll intre cele 2 optiuni
+            expImpIndex ^= 1;
+            needsDisplayUpdate = true;
+        } else if (btnIndex == 3) {     // GALBEN — select
+            if (expImpIndex == 0) {
+                // EXPORT DATA -> logica de export se adauga in pasul urmator
+                Serial.println("[EXP/IMP] Export Data selectat");
+                tone(PIN_BUZZER, 1000, 80);
+            } else {
+                // IMPORT DATA -> logica de import se adauga in pasul urmator
+                Serial.println("[EXP/IMP] Import Data selectat");
+                tone(PIN_BUZZER, 1000, 80);
+            }
+        } else if (btnIndex == 0) {     // ROSU — inapoi la meniul admin
+            currentState = STATE_ADMIN_MENU;
             needsDisplayUpdate = true;
         }
 

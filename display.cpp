@@ -983,14 +983,14 @@ void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) 
     display.print("Admin Mode");
     display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
 
-    const char* const items[8] = {"Game Settings", "Bomb Parameters", "Respawn Rules", "Sync Units", "TAG Writer", "Change Mode", "System Restart", "Power Off"};
+    const char* const items[9] = {"Game Settings", "Bomb Parameters", "Respawn Rules", "Sync Units", "TAG Writer", "Imp. / Exp. Data", "Change Mode", "System Restart", "Power Off"};
 
     uint8_t shown = 0;
-    for (uint8_t i = scrollIndex; i < 8; i++) {
+    for (uint8_t i = scrollIndex; i < 9; i++) {
         if (shown >= 5) break;
 
-        // Ascundem Change Mode (index 5) daca nu avem mod selectat
-        if (i == 5 && selectedMode == -1) continue;
+        // Ascundem Change Mode (index 6) daca nu avem mod selectat
+        if (i == 6 && selectedMode == -1) continue;
 
         display.setCursor(0, 14 + (shown * 10));
 
@@ -1005,14 +1005,57 @@ void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) 
         shown++;
     }
 
-    uint8_t total = (selectedMode == -1) ? 7 : 8;
+    uint8_t total = (selectedMode == -1) ? 8 : 9;
     drawScrollbar(total, 5, scrollIndex, 13, 51);
     display.display();
 }
+
+void drawExpImpMenu(uint8_t index) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    uint8_t x;
+    // Titlu + linie (ca pe celelalte sub-pagini)
+    const char* title = "Exp. / Imp. Data";
+    x = (SCREEN_WIDTH - strlen(title) * 6) / 2;
+    display.setCursor(x, 0); display.print(title);
+    display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
+    // "Please select an option:" pe doua randuri
+    const char* h1 = "Please select";
+    x = (SCREEN_WIDTH - strlen(h1) * 6) / 2;
+    display.setCursor(x, 15); display.print(h1);
+    const char* h2 = "an option:";
+    x = (SCREEN_WIDTH - strlen(h2) * 6) / 2;
+    display.setCursor(x, 25); display.print(h2);
+    // Optiuni dupa un mic spatiu (fara linie)
+    const char* const items[2] = {"Export Data", "Import Data"};
+    for (uint8_t i = 0; i < 2; i++) {
+        uint8_t y = 41 + i * 11;
+        display.setCursor(0, y);
+        if (i == index) {
+            display.drawBitmap(0, y, ARROW_RIGHT, 5, 7, SSD1306_WHITE);
+            display.setCursor(12, y);
+        } else {
+            display.print("  ");
+        }
+        display.print(items[i]);
+    }
+    display.display();
+}
+
+void drawExpImpWait() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "Please Wait ...";
+    uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
+    display.setCursor(x, 28);
+    display.print(l1);
+    display.display();
+}
+
 void drawAdminPages(const AdminContext& ac) {
     display.clearDisplay();
     display.setTextSize(1);
-    const char* const items[8] = {"Game Settings", "Bomb Parameters", "Respawn Rules", "Sync Units", "TAG Writer", "Change Mode", "System Restart", "Power Off"};
+    const char* const items[9] = {"Game Settings", "Bomb Parameters", "Respawn Rules", "Sync Units", "TAG Writer", "Imp. / Exp. Data", "Change Mode", "System Restart", "Power Off"};
     if (ac.selectedPage == 0) {
         // --- GAME SETTINGS ---
         const char* const wcT[] = {"By Points", "By Conquest", "By Any"};
