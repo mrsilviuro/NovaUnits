@@ -1074,6 +1074,18 @@ void drawExportDone(const char* l1, const char* l2) {
     display.display();
 }
 
+void drawImportWait() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "Place admin card";
+    uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
+    display.setCursor(x, 20); display.print(l1);
+    const char* l2 = "to import ...";
+    x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
+    display.setCursor(x, 32); display.print(l2);
+    display.display();
+}
+
 void drawAdminPages(const AdminContext& ac) {
     display.clearDisplay();
     display.setTextSize(1);

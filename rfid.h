@@ -40,3 +40,12 @@ enum RfidExportResult : uint8_t {
 };
 // Scrie blob-ul de stare pe un card admin (sectoarele 2..7). Verifica intai ca e admin tag.
 RfidExportResult rfidExportState(const uint8_t* blob, uint16_t len);
+
+enum RfidImportResult : uint8_t {
+    IMPORT_OK,
+    IMPORT_NO_TAG,
+    IMPORT_NOT_ADMIN,
+    IMPORT_READ_FAIL
+};
+// Citeste blob-ul de stare de pe un card admin (sectoarele 2..7) in 'blob'.
+RfidImportResult rfidImportState(uint8_t* blob, uint16_t len);

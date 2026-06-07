@@ -15,6 +15,8 @@ extern bool     localTimePaused;
 // isSynced == false => OFFLINE: nu transmite nicio alerta si ignora
 // alertele de joc primite (dar asculta pachetele SYNC ca sa poata fi adusa online).
 extern bool     isSynced;
+
+void applySettingsFromIndices();   // converteste indecsii de setari in valori (folosit la SYNC si IMPORT)
 extern uint8_t  syncedByUnit;   // ce unitate ne-a sincronizat ultima data
 
 // --- Indecsi setari (DEFINITI in .ino) — necesari pentru pachetul SYNC ---

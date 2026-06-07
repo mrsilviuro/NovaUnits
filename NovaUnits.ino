@@ -53,6 +53,10 @@ const char* exportResL1     = "";   // mesaj rezultat export (linia 1/2)
 const char* exportResL2     = "";
 uint32_t   exportDoneStart  = 0;
 uint32_t   exportWaitStart  = 0;   // start fereastra de 3s 'pune cardul' (export)
+uint32_t   importWaitStart  = 0;   // start fereastra de 3s 'pune cardul' (import)
+const char* importResL1     = "";
+const char* importResL2     = "";
+uint32_t   importDoneStart  = 0;
 uint8_t   adminSelectedPage = 0;
 uint32_t  adminSavedTime    = 0;
 GameState previousStateBeforeAdmin = STATE_MENU;
@@ -501,6 +505,9 @@ uint16_t buildExportBlob(uint8_t* b) {
         }
         for (uint8_t t = 0; t < 4; t++)
             b[p++] = (r.kills[t] > 255) ? 255 : (uint8_t)r.kills[t];
+        int16_t lc = (int16_t)liveCapture[u];   // puncte live ale episodului curent de cucerire
+        b[p++] = (lc >> 8) & 0xFF;
+        b[p++] =  lc       & 0xFF;
     }
     // penalizari globale
     for (uint8_t t = 0; t < 4; t++) {
@@ -513,6 +520,82 @@ uint16_t buildExportBlob(uint8_t* b) {
     b[p++] = (crc >> 8) & 0xFF;
     b[p++] =  crc       & 0xFF;
     return p;
+}
+
+// ============================================================
+// applyImportBlob() — valideaza (magic+versiune+CRC) si aplica starea de pe card.
+// Unitatea noua intra "la curent" cu reteaua (NU cloneaza unitatea veche).
+// ============================================================
+bool applyImportBlob(const uint8_t* b, uint16_t len) {
+    if (len < 4) return false;
+    if (b[0] != RFID_MAGIC_BYTE || b[1] != STATE_BLOB_VERSION) return false;
+    uint16_t crcCalc = crc16(b, len - 2);
+    uint16_t crcCard = ((uint16_t)b[len - 2] << 8) | b[len - 1];
+    if (crcCalc != crcCard) return false;
+
+    uint16_t p = 2;
+    // setari (indici) -> valori derivate
+    gsTimeLimit = b[p++]; gsWinCond = b[p++]; gsActionIdx = b[p++]; gsBonus = b[p++];
+    bsTimerIdx  = b[p++]; bsCooldownIdx = b[p++]; bsExpPtsIdx = b[p++]; bsDefPtsIdx = b[p++];
+    rsTimeIdx   = b[p++]; rsPenaltyIdx  = b[p++];
+    rsLimitIdx[0] = b[p++]; rsLimitIdx[1] = b[p++]; rsLimitIdx[2] = b[p++]; rsLimitIdx[3] = b[p++];
+    applySettingsFromIndices();
+
+    // flux joc
+    gameTimeLeftSeconds = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
+    uint8_t flags = b[p++];
+    isGameTimerRunning = (flags & 0x01) != 0;
+    isGamePaused       = (flags & 0x02) != 0;
+    isTimeOut          = (flags & 0x04) != 0;
+    conquestWinner     = (Team)b[p++];
+
+    uint32_t now = millis();
+    if (isGamePaused) pauseStartTime = now;
+    lastTimerTick = now;
+    uint32_t ref = now;   // pauseStartTime == now cand suntem pe pauza
+
+    // unitTable[12]
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        uint8_t packed = b[p++];
+        unitTable[u].mode   = packed & 0x03;
+        unitTable[u].status = (packed >> 2) & 0x03;
+        unitTable[u].team   = (Team)((packed >> 4) & 0x07);
+        uint16_t heldSec = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
+        for (uint8_t t = 0; t < 4; t++) {
+            uint16_t raw = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
+            unitTable[u].savedPoints[t] = (int32_t)(int16_t)raw;
+        }
+        for (uint8_t t = 0; t < 4; t++)
+            unitTable[u].kills[t] = b[p++];
+        uint16_t lcraw = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
+        liveCapture[u] = (int32_t)(int16_t)lcraw;
+
+        // reconstructie timpi (relativ la ceasul local)
+        uint32_t heldMs = (uint32_t)heldSec * 1000;
+        bool sectorCap  = (unitTable[u].mode == 1 && unitTable[u].status == SEC_CAPTURED && unitTable[u].team != TEAM_NEUTRAL);
+        bool bombActive = (unitTable[u].mode == 2 && (unitTable[u].status == BOMB_ARMED || unitTable[u].status == BOMB_COOLDOWN));
+        if (sectorCap || bombActive) {
+            unitTable[u].actionTime = (ref > heldMs) ? (ref - heldMs) : ref;
+            lastPointTick[u] = sectorCap ? (unitTable[u].actionTime + (heldMs / 10000) * 10000) : 0;
+        } else {
+            unitTable[u].actionTime = 0;
+            lastPointTick[u]        = 0;
+            liveCapture[u]          = 0;
+        }
+        // unitatile active sunt considerate "vazute" acum (sa nu apara OFFLINE imediat)
+        if (unitTable[u].mode != 0) lastSeenTime[u] = now;
+    }
+
+    // penalizari globale
+    for (uint8_t t = 0; t < 4; t++) {
+        uint16_t raw = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
+        appliedPenalties[t] = (int32_t)(int16_t)raw;
+    }
+
+    // Unitate noua: e acum la curent si sincronizata; modul propriu se alege din nou
+    selectedMode = -1;
+    isSynced     = true;
+    return true;
 }
 
 void setup() {
@@ -1267,6 +1350,51 @@ void loop() {
             }
             break;
 
+        case STATE_IMPORT_WAIT:
+            if (needsDisplayUpdate) { drawImportWait(); needsDisplayUpdate = false; }
+            // 3s fara card -> ton de fail si back singur la sub-meniu
+            if (millis() - importWaitStart >= 3000) {
+                tone(PIN_BUZZER, 200, 400);
+                expImpIndex = 0;
+                currentState = STATE_EXPIMP_MENU;
+                needsDisplayUpdate = true;
+                break;
+            }
+            if (millis() - lastRfidRead >= 150) {
+                lastRfidRead = millis();
+                RfidImportResult ir = rfidImportState(stateBlob, STATE_BLOB_LEN);
+                if (ir == IMPORT_OK) {
+                    if (applyImportBlob(stateBlob, STATE_BLOB_LEN)) {
+                        importResL1 = "Import"; importResL2 = "OK";
+                        tone(PIN_BUZZER, 1800, 400);
+                    } else {
+                        importResL1 = "Import"; importResL2 = "FAILED";   // magic/versiune/CRC invalide
+                        tone(PIN_BUZZER, 200, 400);
+                    }
+                    currentState = STATE_IMPORT_DONE; importDoneStart = millis();
+                    needsDisplayUpdate = true; rfidIgnoreUntil = millis() + 2000;
+                } else if (ir == IMPORT_NOT_ADMIN) {
+                    importResL1 = "Not an"; importResL2 = "admin card";
+                    currentState = STATE_IMPORT_DONE; importDoneStart = millis();
+                    needsDisplayUpdate = true; tone(PIN_BUZZER, 200, 400); rfidIgnoreUntil = millis() + 2000;
+                } else if (ir == IMPORT_READ_FAIL) {
+                    importResL1 = "Import"; importResL2 = "FAILED";
+                    currentState = STATE_IMPORT_DONE; importDoneStart = millis();
+                    needsDisplayUpdate = true; tone(PIN_BUZZER, 200, 400); rfidIgnoreUntil = millis() + 2000;
+                }
+                // IMPORT_NO_TAG -> ramanem in asteptare
+            }
+            break;
+
+        case STATE_IMPORT_DONE:
+            if (needsDisplayUpdate) { drawExportDone(importResL1, importResL2); needsDisplayUpdate = false; }
+            if (millis() - importDoneStart >= 2000) {
+                expImpIndex = 0;
+                currentState = STATE_EXPIMP_MENU;
+                needsDisplayUpdate = true;
+            }
+            break;
+
         case STATE_ADMIN_MENU:
             if (needsDisplayUpdate) {
                 drawAdminMenu(adminMenuIndex, adminScrollIndex, selectedMode);
@@ -1710,8 +1838,11 @@ void onShortPress(uint8_t btnIndex) {
                 needsDisplayUpdate = true;
                 tone(PIN_BUZZER, 1000, 80);
             } else {
-                // IMPORT DATA -> logica de import se adauga in pasul urmator
-                Serial.println("[EXP/IMP] Import Data selectat");
+                // IMPORT DATA -> asteptam cardul si actualizam starea de pe el
+                lastRfidRead = millis();
+                importWaitStart = millis();
+                currentState = STATE_IMPORT_WAIT;
+                needsDisplayUpdate = true;
                 tone(PIN_BUZZER, 1000, 80);
             }
         } else if (btnIndex == 0) {     // ROSU — inapoi la meniul admin

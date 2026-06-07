@@ -199,7 +199,7 @@ void loraSendTimeSync(uint16_t sec) {      // corectie de timp de la maestru (SI
 // applySettingsFromIndices() — converteste indecsii in valori
 // (aceleasi tabele de optiuni ca la "CONFIRM" din admin)
 // ============================================================
-static void applySettingsFromIndices() {
+void applySettingsFromIndices() {
     const uint32_t tl[] = {0, 900, 1800, 3600, 7200, 10800, 14400, 18000, 21600, 25200, 28800, 32400, 36000, 39600, 43200, 86400};
     const uint16_t bn[] = {0, 15, 30, 60, 120, 180, 240};
     const uint32_t at[] = {5000, 10000, 15000, 20000};

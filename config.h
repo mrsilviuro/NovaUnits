@@ -7,7 +7,7 @@
 // ============================================================
 // IDENTITATE UNITATE  — se schimba per unitate inainte de upload
 // ============================================================
-#define UNIT_ID 1
+#define UNIT_ID 4
 #define NETWORK_ID 0x4E      // 1 octet, marker+filtru retea (schimba per lot de unitati)
 #define MAX_UNITS 12
 
@@ -86,6 +86,7 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
 #define RFID_MAGIC_BYTE 0x4E
 #define RFID_BLOCK_ADDR 4
 #define STATE_BLOB_VERSION 0x01   // versiune format export/import card
+#define STATE_BLOB_LEN     234     // lungimea blob-ului serializat
 
 // ============================================================
 // ECHIPE & UNITATI
@@ -129,6 +130,8 @@ enum GameState : uint8_t {
   STATE_EXPIMP_WAIT,
   STATE_EXPORT_WAIT,
   STATE_EXPORT_DONE,
+  STATE_IMPORT_WAIT,
+  STATE_IMPORT_DONE,
   STATE_ADMIN_TAG_WRITE,
   STATE_WAIT_ADMIN_TAG,
   STATE_LOADING,
