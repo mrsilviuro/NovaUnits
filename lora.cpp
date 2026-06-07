@@ -10,12 +10,14 @@ HardwareSerial LoRaSerial(1);   // UART1
 uint32_t localTime       = 0;
 uint8_t  loraTimeAction  = 0;
 uint16_t loraResumeTime  = 0;   // secunda primita in alerta de RESUME
+uint16_t loraTimeSyncSec = 0;   // secunda primita in TIME_SYNC
 uint8_t  loraEvtUnit     = 0;
 uint8_t  loraEvtTeam     = 0;
 int32_t  loraEvtPoints   = 0;
 uint32_t lastLocalTick   = 0;
 bool     localTimePaused = false;
 bool     isSynced        = false;
+bool     isTimeMaster    = false;   // true daca eu am trimis sync (autoritatea de timp)
 uint8_t  syncedByUnit    = 0;
 
 // Pachet SYNC: [NET][TYPE][UNIT][lt2][lt1][lt0][set x6][CRC] = 13 octeti
@@ -30,6 +32,7 @@ uint8_t  syncedByUnit    = 0;
 #define BOMB_PKT_LEN    5       // [NET][TYPE][UNIT][team][CRC]
 #define KILLRESET_PKT_LEN 7     // [NET][TYPE][UNIT][winnerTeam][pts_hi][pts_lo][CRC]
 #define HEARTBEAT_PKT_LEN 4     // [NET][TYPE][UNIT][CRC] (bateria e deja in UNIT)
+#define TIME_SYNC_PKT_LEN 6     // [NET][TYPE][UNIT][sec_hi][sec_lo][CRC]
 
 // ============================================================
 // Bit-cursor: scriem/citim cate nbits, MSB-first, pe un buffer
@@ -133,21 +136,6 @@ static uint8_t unitByte() {
 
 void loraTxUpdate() {
     loraDeferUpdate();
-    // Heartbeat: dupa sincronizare pornim timerul; la expirare trimitem keep-alive
-    if (isSynced) {
-        if (nextHeartbeat == 0) {
-            heartbeatReschedule();
-        } else if ((int32_t)(millis() - nextHeartbeat) >= 0) {
-            uint8_t hb[HEARTBEAT_PKT_LEN];
-            hb[0] = (uint8_t)NETWORK_ID;
-            hb[1] = PKT_HEARTBEAT;
-            hb[2] = unitByte();
-            uint8_t cs = 0;
-            for (uint8_t i = 0; i < HEARTBEAT_PKT_LEN - 1; i++) cs ^= hb[i];
-            hb[HEARTBEAT_PKT_LEN - 1] = cs;
-            loraQueueSendDup(hb, HEARTBEAT_PKT_LEN);   // dubla copie pt fiabilitate; reseteaza timerul
-        }
-    }
     switch (txState) {
         case TX_IDLE:
             if (txCount > 0) { txState = TX_START; txTimer = millis(); }
@@ -174,6 +162,37 @@ void loraTxUpdate() {
             }
             break;
     }
+}
+
+// Heartbeat / TIME_SYNC — apelate din loop()
+bool loraHeartbeatDue() {
+    if (!isSynced) return false;
+    if (nextHeartbeat == 0) { heartbeatReschedule(); return false; }   // init la prima sincronizare
+    return (int32_t)(millis() - nextHeartbeat) >= 0;
+}
+
+void loraSendHeartbeat() {                 // keep-alive simplu (dublat pt fiabilitate)
+    uint8_t hb[HEARTBEAT_PKT_LEN];
+    hb[0] = (uint8_t)NETWORK_ID;
+    hb[1] = PKT_HEARTBEAT;
+    hb[2] = unitByte();
+    uint8_t cs = 0;
+    for (uint8_t i = 0; i < HEARTBEAT_PKT_LEN - 1; i++) cs ^= hb[i];
+    hb[HEARTBEAT_PKT_LEN - 1] = cs;
+    loraQueueSendDup(hb, HEARTBEAT_PKT_LEN);
+}
+
+void loraSendTimeSync(uint16_t sec) {      // corectie de timp de la maestru (SINGLE send: o pauza, valoare proaspata)
+    uint8_t b[TIME_SYNC_PKT_LEN];
+    b[0] = (uint8_t)NETWORK_ID;
+    b[1] = PKT_TIME_SYNC;
+    b[2] = unitByte();
+    b[3] = (sec >> 8) & 0xFF;
+    b[4] = sec & 0xFF;
+    uint8_t cs = 0;
+    for (uint8_t i = 0; i < TIME_SYNC_PKT_LEN - 1; i++) cs ^= b[i];
+    b[TIME_SYNC_PKT_LEN - 1] = cs;
+    loraQueueSend(b, TIME_SYNC_PKT_LEN);
 }
 
 // ============================================================
@@ -287,6 +306,7 @@ void loraSendSyncBlocking() {
     localTimePaused = false;            // livrat -> reluam numaratoarea
     lastLocalTick   = millis();
     isSynced        = true;
+    isTimeMaster    = true;                 // eu am trimis sync -> sunt autoritatea de timp
     lastSeenTime[UNIT_ID - 1] = millis();   // am transmis -> "ultimul semnal" local (pag.5)
     Serial.print("[LORA] SYNC trimis @localTime=");
     Serial.println(localTime);
@@ -489,6 +509,7 @@ LoraEvent loraPoll() {
         else if (rxBuf[1] == PKT_BOMB_PLANT || rxBuf[1] == PKT_BOMB_DEFUSE) rxLen = BOMB_PKT_LEN;
         else if (rxBuf[1] == PKT_KILLRESET) rxLen = KILLRESET_PKT_LEN;
         else if (rxBuf[1] == PKT_HEARTBEAT) rxLen = HEARTBEAT_PKT_LEN;
+        else if (rxBuf[1] == PKT_TIME_SYNC) rxLen = TIME_SYNC_PKT_LEN;
         else { rxCount = 0; rxLen = 0; break; }   // tip necunoscut -> resync
     }
         }
@@ -520,10 +541,14 @@ LoraEvent loraPoll() {
         uint8_t batt = (rxBuf[2] >> 4) & 0x07;
         uint8_t mode = rxBuf[3], team = rxBuf[4];
         if (u >= 1 && u <= MAX_UNITS && u != UNIT_ID) {
-            unitTable[u - 1].mode       = mode;
-            unitTable[u - 1].status     = 0;            // fara actiune inca (neutral/idle)
-            unitTable[u - 1].team       = (Team)team;   // doar respawn trimite echipa la acest pas
-            unitTable[u - 1].actionTime = 0;
+            if (unitTable[u - 1].mode != mode) {        // doar la SCHIMBARE reala de mod -> nu sterge o cucerire activa la copia dubla
+                unitTable[u - 1].mode       = mode;
+                unitTable[u - 1].status     = 0;        // fara actiune inca (neutral/idle)
+                unitTable[u - 1].team       = (Team)team;
+                unitTable[u - 1].actionTime = 0;
+            } else if (mode == 3) {
+                unitTable[u - 1].team       = (Team)team;   // respawn isi poate schimba echipa fara reset
+            }
             globalBattery[u - 1] = batt;
             lastSeenTime[u - 1] = millis();
             Serial.print("[LORA] MODE de la unit "); Serial.print(u);
@@ -625,6 +650,16 @@ LoraEvent loraPoll() {
         return LORA_EVT_NONE;   // fara handler in .ino (silentios, ca MODE)
     }
 
+    if (type == PKT_TIME_SYNC) {
+        if (!isSynced) return LORA_EVT_NONE;
+        uint8_t u = rxBuf[2] & 0x0F;
+        if (u == UNIT_ID) return LORA_EVT_NONE;
+        uint8_t batt = (rxBuf[2] >> 4) & 0x07;
+        if (u >= 1 && u <= MAX_UNITS) { globalBattery[u-1] = batt; lastSeenTime[u-1] = millis(); }
+        loraTimeSyncSec = ((uint16_t)rxBuf[3] << 8) | rxBuf[4];   // timpul ramas, de la maestru
+        return LORA_EVT_TIME_SYNC;
+    }
+
     // --- SYNC ---
     uint8_t  fromUnit = rxBuf[2];
     uint32_t lt = ((uint32_t)rxBuf[3] << 16) | ((uint32_t)rxBuf[4] << 8) | rxBuf[5];
@@ -650,6 +685,7 @@ LoraEvent loraPoll() {
     lastLocalTick   = now;            // numaram imediat de la valoarea primita
     localTimePaused = false;
     isSynced        = true;
+    isTimeMaster    = false;                // am primit sync -> nu sunt autoritatea de timp
     syncedByUnit    = fromUnit;
     if (fromUnit >= 1 && fromUnit <= MAX_UNITS) lastSeenTime[fromUnit - 1] = now;
     Serial.print("[LORA] SYNC primit de la unit ");

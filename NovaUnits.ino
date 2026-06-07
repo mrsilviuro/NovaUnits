@@ -9,6 +9,8 @@
 #include "rfid.h"
 #include "lora.h"
 
+#define FW_VERSION "NU-diag-1"   // DIAG: bumpeaza la fiecare build ca sa verifici ca toate unitatile au acelasi cod
+
 #include <esp_wifi.h>
 #include <esp_bt.h>
 
@@ -90,6 +92,8 @@ uint16_t   killResetPoints     = 0;
 bool       killResetHasPoints  = false;
 uint32_t   killResetDoneStart  = 0;
 uint32_t   lastKillResetAt     = 0;   // dedup KILLRESET
+uint32_t   lastDiagPrint       = 0;   // DIAG: ultimul dump pe serial
+bool       timeSyncFreezing    = false; // maestrul: ingheata countdown-ul cat trimite TIME_SYNC
 
 // --- Card puncte (bonus) ---
 uint16_t   bonusPoints         = 0;
@@ -483,6 +487,22 @@ void loop() {
         else                      applyNeutralize(UNIT_ID - 1, sectorApplyTeam, sectorApplyPts);
         sectorApplyArmed = false;
     }
+
+    // Heartbeat / TIME_SYNC: maestrul (cel care a dat sync) re-sincronizeaza periodic
+    // timpul jocului, ca sa anuleze drift-ul de ceas dintre ESP-uri.
+    if (loraHeartbeatDue()) {
+        if (isTimeMaster && isGameTimerRunning && !isGamePaused && !isTimeOut &&
+            gameTimeLeftSeconds > 0 && currentWinCondition != WIN_BY_CONQUEST) {
+            loraSendTimeSync((uint16_t)gameTimeLeftSeconds);   // single send -> o singura pauza
+            timeSyncFreezing = true;                            // ingheata countdown-ul pana iese pachetul
+            } else {
+                loraSendHeartbeat();                                // keep-alive simplu
+            }
+    }
+    if (timeSyncFreezing && loraTxIdle()) {                     // pachetul a iesit (AUX LOW) -> reluam
+        timeSyncFreezing = false;
+        lastTimerTick = millis();                               // reluam faza secundei
+    }
     if (respawnWindowStart != 0 && now >= respawnWindowStart && now - respawnWindowStart >= 15000) {
         if (myRow().team != TEAM_NEUTRAL)
             loraSendRespawn((uint8_t)myRow().team, myRow().kills[myRow().team - 1]);   // trimitem totalul curent
@@ -562,6 +582,12 @@ void loop() {
             if (loraEvtTeam >= 1 && loraEvtTeam <= 4 && loraEvtPoints > 0)
                 unitTable[loraEvtUnit - 1].savedPoints[loraEvtTeam - 1] += (int32_t)loraEvtPoints;
             tone(PIN_BUZZER, 1500, 200);
+            needsDisplayUpdate = true;
+        }
+    } else if (ev == LORA_EVT_TIME_SYNC) {
+        if (isGameTimerRunning && !isGamePaused && currentWinCondition != WIN_BY_CONQUEST) {
+            gameTimeLeftSeconds = loraTimeSyncSec;   // corectam drift-ul: snap la timpul maestrului
+            lastTimerTick = now;                      // reluam faza secundei
             needsDisplayUpdate = true;
         }
     }
@@ -650,7 +676,7 @@ void loop() {
     if (isGameTimerRunning && !isGamePaused && (now - lastTimerTick > 2000))
         lastTimerTick = now - 1000;   // clamp anti-drain (tick invechit)
         if (isGameTimerRunning && !isGamePaused && !isTimeOut && gameTimeLeftSeconds > 0 &&
-            currentWinCondition != WIN_BY_CONQUEST) {
+            currentWinCondition != WIN_BY_CONQUEST && !timeSyncFreezing) {
             if (now - lastTimerTick >= 1000) {
                 lastTimerTick += 1000;
                 gameTimeLeftSeconds--;
@@ -693,7 +719,11 @@ void loop() {
             if (unitTable[u].mode == 1 && unitTable[u].status == SEC_CAPTURED && unitTable[u].team != TEAM_NEUTRAL) {
                 if (lastPointTick[u] == 0 || lastPointTick[u] > now) lastPointTick[u] = now;   // clamp: evita underflow
                 if (now - lastPointTick[u] >= 10000) {
-                    uint32_t minutesHeld = (now - unitTable[u].actionTime) / 60000;
+                    // +5s (jumatate de tick): pragul de bonus (15min) cade fix pe o granita de tick;
+                    // un decalaj de ~1ms intre actionTime si now facea minutesHeld sa fie 14 in loc de 15
+                    // pe unele unitati -> pierdeau o treapta de bonus. Evaluam la mijlocul intervalului.
+                    uint32_t heldMs = (now > unitTable[u].actionTime) ? (now - unitTable[u].actionTime) : 0;
+                    uint32_t minutesHeld = (heldMs + 5000) / 60000;
                     uint32_t bonus = (bonusIntervalMinutes > 0) ? (minutesHeld / bonusIntervalMinutes) : 0;
                     if (bonus > 3) bonus = 3;
                     int32_t gain = 3 + bonus;
@@ -701,6 +731,36 @@ void loop() {
                     liveCapture[u] += gain;                                    // estimare cucerire curenta
                     lastPointTick[u] += 10000;
                 }
+            }
+        }
+    }
+
+    // ============================================================
+    // DIAG SCOR (temporar) — dump pe serial la 60s. Pune cele 3 unitati pe
+    // serial, lasa-le ~20 min, compara liniile "src Ux" intre unitati.
+    // ============================================================
+    if (lastDiagPrint == 0 || now - lastDiagPrint >= 60000) {
+        lastDiagPrint = now;
+        Serial.println();
+        Serial.print("=== DIAG U"); Serial.print(UNIT_ID);
+        Serial.print(" fw="); Serial.print(FW_VERSION);
+        Serial.print(" build="); Serial.print(__DATE__); Serial.print(" "); Serial.print(__TIME__);
+        Serial.print(" bonusInt="); Serial.print(bonusIntervalMinutes);
+        Serial.print(" now="); Serial.println(now);
+        for (uint8_t u = 0; u < MAX_UNITS; u++) {
+            if (unitTable[u].mode == 1 && unitTable[u].status == SEC_CAPTURED && unitTable[u].team != TEAM_NEUTRAL) {
+                uint32_t held = (now > unitTable[u].actionTime) ? (now - unitTable[u].actionTime) : 0;
+                uint32_t mh = (held + 5000) / 60000;
+                uint32_t bn = (bonusIntervalMinutes > 0) ? (mh / bonusIntervalMinutes) : 0;
+                if (bn > 3) bn = 3;
+                Serial.print("  src U"); Serial.print(u + 1);
+                Serial.print(" team="); Serial.print((int)unitTable[u].team);
+                Serial.print(" pts="); Serial.print(unitTable[u].savedPoints[unitTable[u].team - 1]);
+                Serial.print(" actT="); Serial.print(unitTable[u].actionTime);
+                Serial.print(" lpt="); Serial.print(lastPointTick[u]);
+                Serial.print(" held="); Serial.print(held);
+                Serial.print(" min="); Serial.print(mh);
+                Serial.print(" bonus="); Serial.println(bn);
             }
         }
     }

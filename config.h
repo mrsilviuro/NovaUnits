@@ -7,7 +7,7 @@
 // ============================================================
 // IDENTITATE UNITATE  — se schimba per unitate inainte de upload
 // ============================================================
-#define UNIT_ID 4
+#define UNIT_ID 2
 #define NETWORK_ID 0x4E      // 1 octet, marker+filtru retea (schimba per lot de unitati)
 #define MAX_UNITS 12
 
@@ -60,6 +60,7 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
 #define PKT_BOMB_DEFUSE 0x0C
 #define PKT_KILLRESET   0x0D
 #define PKT_HEARTBEAT   0x0E
+#define PKT_TIME_SYNC   0x0F
 
 // ============================================================
 // DISPLAY OLED (2.42" SSD1309 condus de libraria SSD1306)
