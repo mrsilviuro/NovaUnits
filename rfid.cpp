@@ -120,9 +120,9 @@ bool rfidBurnTag() {
 // Sectorul 1 (bloc 4) ramane identitatea de admin, neatins.
 // ============================================================
 static const uint8_t EXP_BLOCKS[] = {
-    8, 9, 10,  12, 13, 14,  16, 17, 18,  20, 21, 22,  24, 25, 26,  28, 29, 30
+    8, 9, 10,  12, 13, 14,  16, 17, 18,  20, 21, 22,  24, 25, 26,  28, 29, 30,  32, 33, 34
 };
-static const uint8_t EXP_BLOCK_COUNT = sizeof(EXP_BLOCKS);   // 18 blocuri = 288 octeti
+static const uint8_t EXP_BLOCK_COUNT = sizeof(EXP_BLOCKS);   // 21 blocuri = 336 octeti
 
 RfidExportResult rfidExportState(const uint8_t* blob, uint16_t len) {
     uint8_t uid[7] = {0};

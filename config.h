@@ -7,7 +7,7 @@
 // ============================================================
 // IDENTITATE UNITATE  — se schimba per unitate inainte de upload
 // ============================================================
-#define UNIT_ID 1
+#define UNIT_ID 2
 #define NETWORK_ID 0x4E      // 1 octet, marker+filtru retea (schimba per lot de unitati)
 #define MAX_UNITS 12
 
@@ -85,8 +85,8 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
   { 0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6 }
 #define RFID_MAGIC_BYTE 0x4E
 #define RFID_BLOCK_ADDR 4
-#define STATE_BLOB_VERSION 0x02   // versiune format export/import card
-#define STATE_BLOB_LEN     260     // lungimea blob-ului serializat
+#define STATE_BLOB_VERSION 0x03   // versiune format export/import card
+#define STATE_BLOB_LEN     296     // lungimea blob-ului serializat
 
 // ============================================================
 // ECHIPE & UNITATI

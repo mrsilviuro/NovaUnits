@@ -47,7 +47,7 @@ bool     latchPulsing   = false;
 uint8_t   adminMenuIndex    = 0;
 uint8_t   adminScrollIndex  = 0;
 uint8_t   expImpIndex       = 0;   // 0=Export, 1=Import (sub-meniu Exp./Imp. Data)
-uint8_t    stateBlob[256];          // buffer serializare stare joc (export/import card)
+uint8_t    stateBlob[336];          // buffer serializare stare joc (export/import card)
 uint16_t   stateBlobLen     = 0;
 const char* exportResL1     = "";   // mesaj rezultat export (linia 1/2)
 const char* exportResL2     = "";
@@ -522,6 +522,22 @@ uint16_t buildExportBlob(uint8_t* b) {
         b[p++] = (ap >> 8) & 0xFF;
         b[p++] =  ap       & 0xFF;
     }
+    // momentele ultimelor alerte (timp scurs, in secunde) + nivel baterie per unitate
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        uint16_t seenSec;
+        if (lastSeenTime[u] == 0) {
+            seenSec = 0xFFFF;   // sentinela: niciodata vazuta
+        } else {
+            int32_t d = (int32_t)(ref - lastSeenTime[u]);
+            uint32_t sec = (d > 0) ? ((uint32_t)d / 1000) : 0;
+            seenSec = (sec > 65534) ? 65534 : (uint16_t)sec;
+        }
+        b[p++] = (seenSec >> 8) & 0xFF;
+        b[p++] =  seenSec       & 0xFF;
+    }
+    for (uint8_t u = 0; u < MAX_UNITS; u++)
+        b[p++] = globalBattery[u];
+
     // CRC16 peste tot ce am scris pana acum
     uint16_t crc = crc16(b, p);
     b[p++] = (crc >> 8) & 0xFF;
@@ -589,8 +605,6 @@ bool applyImportBlob(const uint8_t* b, uint16_t len) {
             lastPointTick[u]        = 0;
             liveCapture[u]          = 0;
         }
-        // unitatile active sunt considerate "vazute" acum (sa nu apara OFFLINE imediat)
-        if (unitTable[u].mode != 0) lastSeenTime[u] = now;
     }
 
     // penalizari globale
@@ -598,6 +612,15 @@ bool applyImportBlob(const uint8_t* b, uint16_t len) {
         uint16_t raw = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
         appliedPenalties[t] = (int32_t)(int16_t)raw;
     }
+
+    // momentele ultimelor alerte (reconstruite din timpul scurs) + baterii
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        uint16_t seenSec = ((uint16_t)b[p] << 8) | b[p + 1]; p += 2;
+        if (seenSec == 0xFFFF) lastSeenTime[u] = 0;                       // niciodata vazuta
+        else                   lastSeenTime[u] = now - (uint32_t)seenSec * 1000;   // wraparound-safe
+    }
+    for (uint8_t u = 0; u < MAX_UNITS; u++)
+        globalBattery[u] = b[p++];
 
     // Unitate noua: e acum la curent si sincronizata; modul propriu se alege din nou
     selectedMode = -1;
