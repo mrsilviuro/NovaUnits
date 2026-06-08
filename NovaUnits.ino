@@ -48,6 +48,7 @@ uint8_t   adminMenuIndex    = 0;
 uint8_t   adminScrollIndex  = 0;
 uint8_t   expImpIndex       = 0;   // 0=Export, 1=Import (sub-meniu Exp./Imp. Data)
 uint8_t    stateBlob[336];          // buffer serializare stare joc (export/import card)
+uint32_t   lastPingTime = 0;        // ultimul ping manual (pag.5) — filtru anti-spam 10s
 uint16_t   stateBlobLen     = 0;
 const char* exportResL1     = "";   // mesaj rezultat export (linia 1/2)
 const char* exportResL2     = "";
@@ -1622,44 +1623,17 @@ void onShortPress(uint8_t btnIndex) {
             // pag 3 (kill reset) -> pasii urmatori
         } else if (btnIndex == 3) {     // GALBEN
             if (currentPage == 4) {
-                // PAGE 5 — PING de proba: heartbeat manual pentru a testa conexiunea live.
+                // PAGE 5 — PING de proba: heartbeat unic pentru a testa conexiunea live.
+                // Filtru anti-spam: o singura alerta la 10s; mai devreme -> ton de fail.
                 // Propriul "ultim semnal" revine la 0 (pe pauza ramane 0 pana la resume).
-                loraSendHeartbeat();
-                lastSeenTime[UNIT_ID - 1] = (isGamePaused ? pauseStartTime : millis());
-                needsDisplayUpdate = true;
-                tone(PIN_BUZZER, 1500, 80);
-            } else if (selectedMode == 2 && currentPage != 5) {
-                // RESPAWN — inrolare jucator in coada (un kill / respawn)
-                Team t = myRow().team;
-                if (t != TEAM_NEUTRAL) {
-                    uint8_t ti = t - 1;
-                    if (isGamePaused) { tone(PIN_BUZZER, 200, 200); return; }
-                    bool limitReached = (teamMaxRespawns[ti] > 0 && teamKillTotal(ti) >= teamMaxRespawns[ti]);
-                    if (!isTimeOut && !limitReached && queueCount < 100 &&
-                        isGameTimerRunning) {
-                        respawnQueue[queueTail] = millis() + respawnTimeMs;
-                        queueTail = (queueTail + 1) % 100;
-                        queueCount++;
-                        myRow().kills[ti]++;
-                        appliedPenalties[ti] += respawnPenaltyPoints;   // necplafonat; afisarea clampeaza la 0
-                        if (respawnWindowStart == 0) respawnWindowStart = millis();   // primul kill -> deschidem fereastra de 15s
-                        needsDisplayUpdate = true;
-                        Serial.print("[RESPAWN] Kill inregistrat. Queue: ");
-                        Serial.println(queueCount);
-                        if (teamMaxRespawns[ti] > 0 && teamKillTotal(ti) >= teamMaxRespawns[ti]) {
-                            digitalWrite(PIN_RELAY, LOW);
-                            isRelayActive = true;
-                            relayTurnOffTime = millis() + 3000;
-                            tone(PIN_BUZZER, 1800, 600);
-                            Serial.println("[RESPAWN] LIMIT REACHED!");
-                        } else {
-                            tone(PIN_BUZZER, 1200, 100);
-                        }
-                        } else if (!isGameTimerRunning) {
-                            tone(PIN_BUZZER, 200, 200);
-                    } else if (limitReached) {
-                        tone(PIN_BUZZER, 200, 300);
-                    }
+                if (lastPingTime != 0 && (uint32_t)(millis() - lastPingTime) < 10000) {
+                    tone(PIN_BUZZER, 200, 300);   // prea devreme -> fail
+                } else {
+                    lastPingTime = millis();
+                    loraSendHeartbeat(false);     // o singura alerta (fara dublaj)
+                    lastSeenTime[UNIT_ID - 1] = (isGamePaused ? pauseStartTime : millis());
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1500, 80);
                 }
             } else if (currentPage == 5 && !isTimeOut) {
                 // PAGE 6 — START / PAUSE / RESUME (confirmare prin admin tag 3s)
@@ -1994,7 +1968,7 @@ void onShortPress(uint8_t btnIndex) {
 
 void onLongPress(uint8_t btnIndex) {
     resetActivity();
-    // Actiunile sunt permise doar pe pagina 1, in STATE_PAGES
+    // Actiunile sunt permise in STATE_PAGES (sector/bomba: orice buton; respawn: GALBEN, orice pagina)
     if (currentState != STATE_PAGES || isTimeOut) return;
     if (isGamePaused) { tone(PIN_BUZZER, 200, 200); return; }
     if (!isGameTimerRunning) { tone(PIN_BUZZER, 200, 200); return; }
@@ -2031,6 +2005,35 @@ void onLongPress(uint8_t btnIndex) {
         needsDisplayUpdate = true;
         tone(PIN_BUZZER, 1000, 100);
         Serial.println(currentAction == ACT_ARM ? "[BOMB] Start ARM" : "[BOMB] Start DEFUSE");
+
+    } else if (selectedMode == 2) {  // RESPAWN — inregistrare kill (long-press GALBEN, orice pagina)
+        if (btnIndex != 3) return;            // doar GALBEN inroleaza kill
+        Team t = myRow().team;
+        if (t == TEAM_NEUTRAL) return;        // unitate fara echipa -> nimic
+        uint8_t ti = t - 1;
+        bool limitReached = (teamMaxRespawns[ti] > 0 && teamKillTotal(ti) >= teamMaxRespawns[ti]);
+        if (!limitReached && queueCount < 100) {
+            respawnQueue[queueTail] = millis() + respawnTimeMs;
+            queueTail = (queueTail + 1) % 100;
+            queueCount++;
+            myRow().kills[ti]++;
+            appliedPenalties[ti] += respawnPenaltyPoints;   // necplafonat; afisarea clampeaza la 0
+            if (respawnWindowStart == 0) respawnWindowStart = millis();   // primul kill -> deschidem fereastra de 15s
+            needsDisplayUpdate = true;
+            Serial.print("[RESPAWN] Kill inregistrat. Queue: ");
+            Serial.println(queueCount);
+            if (teamMaxRespawns[ti] > 0 && teamKillTotal(ti) >= teamMaxRespawns[ti]) {
+                digitalWrite(PIN_RELAY, LOW);
+                isRelayActive = true;
+                relayTurnOffTime = millis() + 3000;
+                tone(PIN_BUZZER, 1800, 600);
+                Serial.println("[RESPAWN] LIMIT REACHED!");
+            } else {
+                tone(PIN_BUZZER, 1200, 100);
+            }
+        } else if (limitReached) {
+            tone(PIN_BUZZER, 200, 300);
+        }
     }
 }
 

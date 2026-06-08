@@ -50,6 +50,6 @@ void loraSendKillReset(uint8_t winnerTeam, uint16_t pts); // alerta reset kill-u
 bool loraTxIdle();                                        // true cand coada TX e goala (AUX LOW dupa transmisie)
 void loraSendMode(uint8_t mode, uint8_t team);            // pune in coada alerta MODE (background)
 bool loraHeartbeatDue();                                  // true cand e timpul de heartbeat (apelata in loop)
-void loraSendHeartbeat();                                 // keep-alive simplu (dublat)
+void loraSendHeartbeat(bool dup = true);                  // keep-alive simplu (dup=false -> o singura alerta)
 void loraSendTimeSync(uint16_t sec);                      // corectie de timp de la maestru (single send)
 LoraEvent loraPoll();                                     // citeste UART; intoarce evenimentul primit (deja aplicat)

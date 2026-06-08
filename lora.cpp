@@ -171,7 +171,7 @@ bool loraHeartbeatDue() {
     return (int32_t)(millis() - nextHeartbeat) >= 0;
 }
 
-void loraSendHeartbeat() {                 // keep-alive simplu (dublat pt fiabilitate)
+void loraSendHeartbeat(bool dup) {          // keep-alive simplu (dup=true dublat; dup=false o singura alerta)
     uint8_t hb[HEARTBEAT_PKT_LEN];
     hb[0] = (uint8_t)NETWORK_ID;
     hb[1] = PKT_HEARTBEAT;
@@ -179,7 +179,8 @@ void loraSendHeartbeat() {                 // keep-alive simplu (dublat pt fiabi
     uint8_t cs = 0;
     for (uint8_t i = 0; i < HEARTBEAT_PKT_LEN - 1; i++) cs ^= hb[i];
     hb[HEARTBEAT_PKT_LEN - 1] = cs;
-    loraQueueSendDup(hb, HEARTBEAT_PKT_LEN);
+    if (dup) loraQueueSendDup(hb, HEARTBEAT_PKT_LEN);
+    else     loraQueueSend(hb, HEARTBEAT_PKT_LEN);
 }
 
 void loraSendTimeSync(uint16_t sec) {      // corectie de timp de la maestru (SINGLE send: o pauza, valoare proaspata)
