@@ -156,7 +156,7 @@ void loraTxUpdate() {
             break;
         case TX_WAIT_DONE:
             if (digitalRead(PIN_LORA_AUX) == LOW || millis() - txTimer > 2000) {
-                lastSeenTime[UNIT_ID - 1] = millis();   // am transmis -> "ultimul semnal" local (pag.5)
+                lastSeenTime[UNIT_ID - 1] = (isGamePaused ? pauseStartTime : millis());   // am transmis -> "ultimul semnal" local (pag.5)
                 heartbeatReschedule();                  // sincronizarea e si ea o transmisie
                 txHead = (txHead + 1) % TX_QUEUE_SIZE; txCount--; txState = TX_IDLE;
             }
@@ -307,7 +307,7 @@ void loraSendSyncBlocking() {
     lastLocalTick   = millis();
     isSynced        = true;
     isTimeMaster    = true;                 // eu am trimis sync -> sunt autoritatea de timp
-    lastSeenTime[UNIT_ID - 1] = millis();   // am transmis -> "ultimul semnal" local (pag.5)
+    lastSeenTime[UNIT_ID - 1] = (isGamePaused ? pauseStartTime : millis());   // am transmis -> "ultimul semnal" local (pag.5)
     Serial.print("[LORA] SYNC trimis @localTime=");
     Serial.println(localTime);
 }
@@ -550,8 +550,9 @@ LoraEvent loraPoll() {
                 unitTable[u - 1].team       = (Team)team;   // respawn isi poate schimba echipa fara reset
             }
             globalBattery[u - 1] = batt;
-            lastSeenTime[u - 1] = millis();
-            Serial.print("[LORA] MODE de la unit "); Serial.print(u);
+            lastSeenTime[u - 1] = (isGamePaused ? pauseStartTime : millis());
+            Serial.print("[LORA] MODE de la unit ");
+            Serial.print(u);
             Serial.print(" -> mode="); Serial.print(mode);
             Serial.print(" team="); Serial.println(team);
         }
@@ -566,9 +567,9 @@ LoraEvent loraPoll() {
         uint8_t batt = (rxBuf[2] >> 4) & 0x07;
         if (u >= 1 && u <= MAX_UNITS) {
             globalBattery[u - 1] = batt;
-            lastSeenTime[u - 1] = millis();
+            lastSeenTime[u - 1] = (isGamePaused ? pauseStartTime : millis());
         }
-        loraTimeAction = type - PKT_TIME_START;   // 0=start,1=pause,2=resume,3=reset
+        loraTimeAction = type - PKT_TIME_START; // 0=start,1=pause,2=resume,3=reset
         if (type == PKT_TIME_RESUME) loraResumeTime = ((uint16_t)rxBuf[3] << 8) | rxBuf[4];   // secunda la care reluam
         Serial.print("[LORA] TIME primit, actiune="); Serial.println(loraTimeAction);
         return LORA_EVT_TIME;

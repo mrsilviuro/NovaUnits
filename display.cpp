@@ -735,7 +735,7 @@ void drawPages(const PageContext& ctx) {
                 Team t = ctx.globalUnitStatus[i];
                 bool everSeen = (ctx.lastSeenTime[i] > 0) || (i == UNIT_ID - 1);
                 if (!everSeen) continue;
-                bool offline = (ctx.lastSeenTime[i] > 0) && (now - ctx.lastSeenTime[i] > 1800000);
+                bool offline = (ctx.lastSeenTime[i] > 0) && ((ctx.isGamePaused ? ctx.pauseStartTime : now) - ctx.lastSeenTime[i] > 1800000);
                 rows[count].id = i;
                 rows[count].sortMode = (m == 0) ? 4 : m;
                 // Calcul timp pentru afisare
@@ -847,6 +847,7 @@ void drawPages(const PageContext& ctx) {
         // ====================================================
         case 4: {
             uint32_t now = millis();
+            uint32_t refNow = ctx.isGamePaused ? ctx.pauseStartTime : now;   // pe pauza, timpul ultimei alerte ingheata
             bool showBattery = ((now / 3000) % 2 == 0);
             uint8_t activeUnits[MAX_UNITS];
             uint8_t count = 0;
@@ -873,7 +874,7 @@ void drawPages(const PageContext& ctx) {
                         display.print("- ");
                     }
                     display.print(UNIT_NAMES[uid]);
-                    bool offline = (ctx.lastSeenTime[uid] > 0) && (now - ctx.lastSeenTime[uid] > 1800000);
+                    bool offline = (ctx.lastSeenTime[uid] > 0) && (refNow - ctx.lastSeenTime[uid] > 1800000);
                     if (offline) {
                         const char* off = "OFFLINE";
                         uint8_t tw = strlen(off) * 6;
@@ -886,7 +887,7 @@ void drawPages(const PageContext& ctx) {
                         if (ctx.lastSeenTime[uid] == 0) {
                             strcpy(syncText, "--");
                         } else {
-                            uint32_t el = (now - ctx.lastSeenTime[uid]) / 1000;
+                            uint32_t el = (refNow - ctx.lastSeenTime[uid]) / 1000;
                             formatElapsed(el, syncText, sizeof(syncText));
                         }
                         uint8_t tw = strlen(syncText) * 6;

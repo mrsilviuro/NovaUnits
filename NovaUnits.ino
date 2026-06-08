@@ -374,7 +374,10 @@ void applyGameResume() {
         uint8_t idx = (queueHead + i) % 100;
         respawnQueue[idx] += pauseDuration;
     }
-    needsDisplayUpdate = true;
+    // momentele ultimelor alerte: pastram timpul scurs inghetat pe durata pauzei
+    for (uint8_t u = 0; u < MAX_UNITS; u++)
+        if (lastSeenTime[u] != 0) lastSeenTime[u] += pauseDuration;
+        needsDisplayUpdate = true;
     Serial.println("[GAME] RESUMED!");
 }
 
@@ -1618,7 +1621,14 @@ void onShortPress(uint8_t btnIndex) {
             }
             // pag 3 (kill reset) -> pasii urmatori
         } else if (btnIndex == 3) {     // GALBEN
-            if (selectedMode == 2 && currentPage != 5) {
+            if (currentPage == 4) {
+                // PAGE 5 — PING de proba: heartbeat manual pentru a testa conexiunea live.
+                // Propriul "ultim semnal" revine la 0 (pe pauza ramane 0 pana la resume).
+                loraSendHeartbeat();
+                lastSeenTime[UNIT_ID - 1] = (isGamePaused ? pauseStartTime : millis());
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 1500, 80);
+            } else if (selectedMode == 2 && currentPage != 5) {
                 // RESPAWN — inrolare jucator in coada (un kill / respawn)
                 Team t = myRow().team;
                 if (t != TEAM_NEUTRAL) {
