@@ -7,7 +7,7 @@
 // ============================================================
 // IDENTITATE UNITATE  — se schimba per unitate inainte de upload
 // ============================================================
-#define UNIT_ID 2
+#define UNIT_ID 4
 #define NETWORK_ID 0x4E      // 1 octet, marker+filtru retea (schimba per lot de unitati)
 #define MAX_UNITS 12
 
@@ -101,7 +101,7 @@ enum Team : uint8_t {
 };
 
 const char* const TEAM_NAMES[4] = {
-  "Phantom", "Sentinel", "Falcon", "Nemesis"
+  "Phantoms", "Sentinels", "Falcons", "Nemesis"
 };
 
 const char* const UNIT_NAMES[MAX_UNITS] = {

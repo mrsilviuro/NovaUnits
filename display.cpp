@@ -346,8 +346,9 @@ static void formatElapsed(uint32_t totalSec, char* buf, size_t bufLen) {
 
 // Mica baterie: corp 18x9 + terminal, cu 'bars' (0-4) bare pline
 static void drawBatteryIcon(uint8_t leftX, uint8_t y, uint8_t bars) {
-    display.drawRect(leftX, y, 18, 9, SSD1306_WHITE);
-    display.fillRect(leftX + 18, y + 2, 2, 5, SSD1306_WHITE);
+    display.drawRect(leftX, y, 19, 9, SSD1306_WHITE);              // corp cu 1px mai lung -> bara din dreapta nu mai e lipita de perete
+    display.fillRect(leftX + 19, y + 2, 2, 5, SSD1306_WHITE);      // borna pe dreapta
+    // bare ancorate la stanga (b=0) -> descarcare dreapta->stanga (prima dispare cea din dreapta)
     for (uint8_t b = 0; b < bars && b < 4; b++)
         display.fillRect(leftX + 2 + b * 4, y + 2, 3, 5, SSD1306_WHITE);
 }
@@ -881,7 +882,7 @@ void drawPages(const PageContext& ctx) {
                         display.setCursor(SCREEN_WIDTH - tw - rightMargin, y);
                         display.print(off);
                     } else if (showBattery) {
-                        drawBatteryIcon(SCREEN_WIDTH - 20 - rightMargin, y, ctx.globalBattery[uid]);
+                        drawBatteryIcon(SCREEN_WIDTH - 21 - rightMargin, y, ctx.globalBattery[uid]);
                     } else {
                         char syncText[20];
                         if (ctx.lastSeenTime[uid] == 0) {
