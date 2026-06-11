@@ -21,18 +21,18 @@ bool     isTimeMaster    = false;   // true daca eu am trimis sync (autoritatea 
 uint8_t  syncedByUnit    = 0;
 
 // Pachet SYNC: [NET][TYPE][UNIT][lt2][lt1][lt0][set x6][CRC] = 13 octeti
-#define SYNC_PKT_LEN 13
-#define RESTART_PKT_LEN 4       // [NET][TYPE][UNIT][CRC]
-#define MODE_PKT_LEN    6       // [NET][TYPE][UNIT][mode][team][CRC]
-#define TIME_PKT_LEN    4       // [NET][TYPE][UNIT][CRC] (tipul = actiunea)
-#define TIME_RESUME_PKT_LEN 6   // RESUME: [NET][TYPE][UNIT][sec_hi][sec_lo][CRC]
-#define CAPTURE_PKT_LEN 5       // [NET][TYPE][UNIT][team][CRC]
-#define NEUT_PKT_LEN    7       // [NET][TYPE][UNIT][team][pts_hi][pts_lo][CRC]
-#define RESPAWN_PKT_LEN 7       // [NET][TYPE][UNIT][team][kills_hi][kills_lo][CRC]
-#define BOMB_PKT_LEN    5       // [NET][TYPE][UNIT][team][CRC]
-#define KILLRESET_PKT_LEN 7     // [NET][TYPE][UNIT][winnerTeam][pts_hi][pts_lo][CRC]
-#define HEARTBEAT_PKT_LEN 4     // [NET][TYPE][UNIT][CRC] (bateria e deja in UNIT)
-#define TIME_SYNC_PKT_LEN 6     // [NET][TYPE][UNIT][sec_hi][sec_lo][CRC]
+#define SYNC_PKT_LEN 14
+#define RESTART_PKT_LEN 5       // [NET][TYPE][UNIT][SES][CRC]
+#define MODE_PKT_LEN    7       // [NET][TYPE][UNIT][mode][team][SES][CRC]
+#define TIME_PKT_LEN    5       // [NET][TYPE][UNIT][SES][CRC] (tipul = actiunea)
+#define TIME_RESUME_PKT_LEN 7   // RESUME: [NET][TYPE][UNIT][sec_hi][sec_lo][SES][CRC]
+#define CAPTURE_PKT_LEN 6       // [NET][TYPE][UNIT][team][SES][CRC]
+#define NEUT_PKT_LEN    8       // [NET][TYPE][UNIT][team][pts_hi][pts_lo][SES][CRC]
+#define RESPAWN_PKT_LEN 8       // [NET][TYPE][UNIT][team][kills_hi][kills_lo][SES][CRC]
+#define BOMB_PKT_LEN    6       // [NET][TYPE][UNIT][team][SES][CRC]
+#define KILLRESET_PKT_LEN 8     // [NET][TYPE][UNIT][winnerTeam][pts_hi][pts_lo][SES][CRC]
+#define HEARTBEAT_PKT_LEN 5     // [NET][TYPE][UNIT][SES][CRC] (bateria e deja in UNIT)
+#define TIME_SYNC_PKT_LEN 7     // [NET][TYPE][UNIT][sec_hi][sec_lo][SES][CRC]
 
 // ============================================================
 // Bit-cursor: scriem/citim cate nbits, MSB-first, pe un buffer
@@ -171,14 +171,20 @@ bool loraHeartbeatDue() {
     return (int32_t)(millis() - nextHeartbeat) >= 0;
 }
 
+// Sigileaza pachetul: octet de sesiune la [len-2], apoi CRC (XOR) la [len-1] peste tot restul.
+static void sealPacket(uint8_t* buf, uint8_t len) {
+    buf[len - 2] = sessionId;
+    uint8_t cs = 0;
+    for (uint8_t i = 0; i < len - 1; i++) cs ^= buf[i];
+    buf[len - 1] = cs;
+}
+
 void loraSendHeartbeat(bool dup) {          // keep-alive simplu (dup=true dublat; dup=false o singura alerta)
     uint8_t hb[HEARTBEAT_PKT_LEN];
     hb[0] = (uint8_t)NETWORK_ID;
     hb[1] = PKT_HEARTBEAT;
     hb[2] = unitByte();
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < HEARTBEAT_PKT_LEN - 1; i++) cs ^= hb[i];
-    hb[HEARTBEAT_PKT_LEN - 1] = cs;
+    sealPacket(hb, HEARTBEAT_PKT_LEN);
     if (dup) loraQueueSendDup(hb, HEARTBEAT_PKT_LEN);
     else     loraQueueSend(hb, HEARTBEAT_PKT_LEN);
 }
@@ -190,9 +196,7 @@ void loraSendTimeSync(uint16_t sec) {      // corectie de timp de la maestru (SI
     b[2] = unitByte();
     b[3] = (sec >> 8) & 0xFF;
     b[4] = sec & 0xFF;
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < TIME_SYNC_PKT_LEN - 1; i++) cs ^= b[i];
-    b[TIME_SYNC_PKT_LEN - 1] = cs;
+    sealPacket(b, TIME_SYNC_PKT_LEN);
     loraQueueSend(b, TIME_SYNC_PKT_LEN);
 }
 
@@ -278,9 +282,7 @@ static void buildSyncPacket(uint8_t* buf) {
     putBits(&buf[6], bit, rsLimitIdx[2], 4);
     putBits(&buf[6], bit, rsLimitIdx[3], 4);
 
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < SYNC_PKT_LEN - 1; i++) cs ^= buf[i];
-    buf[SYNC_PKT_LEN - 1] = cs;
+    sealPacket(buf, SYNC_PKT_LEN);
 }
 
 // ============================================================
@@ -292,6 +294,7 @@ void loraSendSyncBlocking() {
     while ((txCount > 0 || txState != TX_IDLE) && millis() - t0 < 3000) loraTxUpdate();
 
     localTimePaused = true;             // inghetam ceasul cat dureaza transmisia
+    if (sessionId == 0) sessionId = (uint8_t)random(1, 256);   // sesiune noua la primul sync (ramane stabila apoi)
     uint8_t txBuf[SYNC_PKT_LEN];
     buildSyncPacket(txBuf);
 
@@ -322,9 +325,7 @@ void loraSendRestart() {
     buf[0] = (uint8_t)NETWORK_ID;
     buf[1] = PKT_RESTART;
     buf[2] = unitByte();
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < RESTART_PKT_LEN - 1; i++) cs ^= buf[i];
-    buf[RESTART_PKT_LEN - 1] = cs;
+    sealPacket(buf, RESTART_PKT_LEN);
     loraQueueSend(buf, RESTART_PKT_LEN);
     loraQueueSend(buf, RESTART_PKT_LEN);   // de 2x pentru siguranta
     Serial.println("[LORA] RESTART pus in coada.");
@@ -341,9 +342,7 @@ void loraSendMode(uint8_t mode, uint8_t team) {
     buf[2] = unitByte();
     buf[3] = mode;
     buf[4] = team;
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < MODE_PKT_LEN - 1; i++) cs ^= buf[i];
-    buf[MODE_PKT_LEN - 1] = cs;
+    sealPacket(buf, MODE_PKT_LEN);
     loraQueueSendDup(buf, MODE_PKT_LEN);
     Serial.print("[LORA] MODE pus in coada: mode="); Serial.print(mode);
     Serial.print(" team="); Serial.println(team);
@@ -363,18 +362,14 @@ void loraSendTime(uint8_t pktType, uint16_t timeVal) {
         buf[2] = unitByte();
         buf[3] = (timeVal >> 8) & 0xFF;
         buf[4] = timeVal & 0xFF;
-        uint8_t cs = 0;
-        for (uint8_t i = 0; i < TIME_RESUME_PKT_LEN - 1; i++) cs ^= buf[i];
-        buf[TIME_RESUME_PKT_LEN - 1] = cs;
+        sealPacket(buf, TIME_RESUME_PKT_LEN);
         loraQueueSendDup(buf, TIME_RESUME_PKT_LEN);
     } else {
         uint8_t buf[TIME_PKT_LEN];
         buf[0] = (uint8_t)NETWORK_ID;
         buf[1] = pktType;
         buf[2] = unitByte();
-        uint8_t cs = 0;
-        for (uint8_t i = 0; i < TIME_PKT_LEN - 1; i++) cs ^= buf[i];
-        buf[TIME_PKT_LEN - 1] = cs;
+        sealPacket(buf, TIME_PKT_LEN);
         loraQueueSendDup(buf, TIME_PKT_LEN);
     }
     Serial.print("[LORA] TIME pus in coada, type="); Serial.println(pktType);
@@ -392,9 +387,7 @@ void loraSendCapture(uint8_t team) {
     buf[1] = PKT_CAPTURE;
     buf[2] = unitByte();
     buf[3] = team;
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < CAPTURE_PKT_LEN - 1; i++) cs ^= buf[i];
-    buf[CAPTURE_PKT_LEN - 1] = cs;
+    sealPacket(buf, CAPTURE_PKT_LEN);
     loraQueueSendDup(buf, CAPTURE_PKT_LEN);
     Serial.print("[LORA] CAPTURE pus in coada, team="); Serial.println(team);
 }
@@ -409,9 +402,7 @@ void loraSendNeutralize(uint8_t team, int32_t points) {
     buf[3] = team;
     buf[4] = (p >> 8) & 0xFF;
     buf[5] = p & 0xFF;
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < NEUT_PKT_LEN - 1; i++) cs ^= buf[i];
-    buf[NEUT_PKT_LEN - 1] = cs;
+    sealPacket(buf, NEUT_PKT_LEN);
     loraQueueSendDup(buf, NEUT_PKT_LEN);
     Serial.print("[LORA] NEUTRALIZE pus in coada, team="); Serial.print(team);
     Serial.print(" pts="); Serial.println(p);
@@ -426,9 +417,7 @@ void loraSendRespawn(uint8_t team, uint16_t totalKills) {
     buf[3] = team;
     buf[4] = (totalKills >> 8) & 0xFF;
     buf[5] = totalKills & 0xFF;
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < RESPAWN_PKT_LEN - 1; i++) cs ^= buf[i];
-    buf[RESPAWN_PKT_LEN - 1] = cs;
+    sealPacket(buf, RESPAWN_PKT_LEN);
     loraQueueSendDup(buf, RESPAWN_PKT_LEN);
     Serial.print("[LORA] RESPAWN pus in coada, team="); Serial.print(team);
     Serial.print(" totalKills="); Serial.println(totalKills);
@@ -441,9 +430,7 @@ void loraSendBombPlant(uint8_t team) {
     buf[1] = PKT_BOMB_PLANT;
     buf[2] = unitByte();
     buf[3] = team;
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < BOMB_PKT_LEN - 1; i++) cs ^= buf[i];
-    buf[BOMB_PKT_LEN - 1] = cs;
+    sealPacket(buf, BOMB_PKT_LEN);
     loraQueueSendDup(buf, BOMB_PKT_LEN);
     Serial.print("[LORA] BOMB PLANT pus in coada, team="); Serial.println(team);
 }
@@ -455,9 +442,7 @@ void loraSendBombDefuse(uint8_t team) {
     buf[1] = PKT_BOMB_DEFUSE;
     buf[2] = unitByte();
     buf[3] = team;
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < BOMB_PKT_LEN - 1; i++) cs ^= buf[i];
-    buf[BOMB_PKT_LEN - 1] = cs;
+    sealPacket(buf, BOMB_PKT_LEN);
     loraQueueSendDup(buf, BOMB_PKT_LEN);
     Serial.print("[LORA] BOMB DEFUSE pus in coada, team="); Serial.println(team);
 }
@@ -471,9 +456,7 @@ void loraSendKillReset(uint8_t winnerTeam, uint16_t pts) {
     buf[3] = winnerTeam;                  // 0 = fara puncte, 1..4 = castigator
     buf[4] = (pts >> 8) & 0xFF;
     buf[5] = pts & 0xFF;
-    uint8_t cs = 0;
-    for (uint8_t i = 0; i < KILLRESET_PKT_LEN - 1; i++) cs ^= buf[i];
-    buf[KILLRESET_PKT_LEN - 1] = cs;
+    sealPacket(buf, KILLRESET_PKT_LEN);
     loraQueueSendDup(buf, KILLRESET_PKT_LEN);
     Serial.print("[LORA] KILLRESET pus in coada, winner="); Serial.print(winnerTeam);
     Serial.print(" pts="); Serial.println(pts);
@@ -526,6 +509,10 @@ LoraEvent loraPoll() {
     uint8_t cs = 0;
     for (uint8_t i = 0; i < len - 1; i++) cs ^= rxBuf[i];
     if (cs != rxBuf[len - 1]) return LORA_EVT_NONE;
+
+    // Filtru de sesiune: ignoram pachetele cu alta sesiune (unitate straina / sync accidental).
+    // Exceptie: SYNC, care tocmai poarta sesiunea ce trebuie adoptata.
+    if (type != PKT_SYNC && rxBuf[len - 2] != sessionId) return LORA_EVT_NONE;
 
     // --- RESTART ---
     if (type == PKT_RESTART) {
@@ -667,6 +654,7 @@ LoraEvent loraPoll() {
     // ar putea trimite sync din greseala si ne-ar suprascrie starea). Acceptam doar
     // cand suntem pe pauza, cu jocul neinceput sau terminat (time out).
     if (isGameTimerRunning && !isGamePaused && !isTimeOut) return LORA_EVT_NONE;
+    sessionId = rxBuf[len - 2];          // adoptam sesiunea maestrului
     uint8_t  fromUnit = rxBuf[2];
     uint32_t lt = ((uint32_t)rxBuf[3] << 16) | ((uint32_t)rxBuf[4] << 8) | rxBuf[5];
 

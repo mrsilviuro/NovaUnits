@@ -46,15 +46,16 @@ bool     latchPulsing   = false;
 // --- Admin ---
 uint8_t   adminMenuIndex    = 0;
 uint8_t   adminScrollIndex  = 0;
-uint8_t   expImpIndex       = 0;   // 0=Export, 1=Import (sub-meniu Exp./Imp. Data)
+uint8_t   expImpIndex       = 0;    // 0=Export, 1=Import (sub-meniu Exp./Imp. Data)
 uint8_t    stateBlob[336];          // buffer serializare stare joc (export/import card)
 uint32_t   lastPingTime = 0;        // ultimul ping manual (pag.5) — filtru anti-spam 10s
+uint8_t    sessionId    = 0;        // sesiune de retea: filtreaza pachetele unitatilor straine
 uint16_t   stateBlobLen     = 0;
 const char* exportResL1     = "";   // mesaj rezultat export (linia 1/2)
 const char* exportResL2     = "";
 uint32_t   exportDoneStart  = 0;
-uint32_t   exportWaitStart  = 0;   // start fereastra de 3s 'pune cardul' (export)
-uint32_t   importWaitStart  = 0;   // start fereastra de 3s 'pune cardul' (import)
+uint32_t   exportWaitStart  = 0;    // start fereastra de 3s 'pune cardul' (export)
+uint32_t   importWaitStart  = 0;    // start fereastra de 3s 'pune cardul' (import)
 const char* importResL1     = "";
 const char* importResL2     = "";
 uint32_t   importDoneStart  = 0;
