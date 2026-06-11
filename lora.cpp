@@ -663,6 +663,10 @@ LoraEvent loraPoll() {
     }
 
     // --- SYNC ---
+    // Daca jocul nostru ruleaza, NU acceptam sync (preventiv: o unitate abia deschisa
+    // ar putea trimite sync din greseala si ne-ar suprascrie starea). Acceptam doar
+    // cand suntem pe pauza, cu jocul neinceput sau terminat (time out).
+    if (isGameTimerRunning && !isGamePaused && !isTimeOut) return LORA_EVT_NONE;
     uint8_t  fromUnit = rxBuf[2];
     uint32_t lt = ((uint32_t)rxBuf[3] << 16) | ((uint32_t)rxBuf[4] << 8) | rxBuf[5];
 

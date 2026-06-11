@@ -686,7 +686,7 @@ void loop() {
 
     // Heartbeat / TIME_SYNC: maestrul (cel care a dat sync) re-sincronizeaza periodic
     // timpul jocului, ca sa anuleze drift-ul de ceas dintre ESP-uri.
-    if (loraHeartbeatDue()) {
+    if (loraHeartbeatDue() && !isGamePaused) {                  // pe pauza amanam heartbeat-ul pana la resume
         if (isTimeMaster && isGameTimerRunning && !isGamePaused && !isTimeOut &&
             gameTimeLeftSeconds > 0 && currentWinCondition != WIN_BY_CONQUEST) {
             loraSendTimeSync((uint16_t)gameTimeLeftSeconds);   // single send -> o singura pauza
@@ -1560,6 +1560,13 @@ void onShortPress(uint8_t btnIndex) {
                 currentState = STATE_MODE_WARNING;
                 needsDisplayUpdate = true;
                 tone(PIN_BUZZER, 1000, 50);
+            } else if (isGameTimerRunning && !isGamePaused && !isTimeOut) {
+                // sincronizata si jocul ruleaza -> nu schimbam modul in timpul jocului
+                blockReturnState   = STATE_MENU;
+                blockMsgStart      = millis();
+                currentState       = STATE_ADMIN_BLOCKED;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 300, 200);
             } else {
                 applySelectedMode();
             }
