@@ -68,6 +68,7 @@ extern uint32_t     gameOverTime;
 
 // --- Comunicatii (meta, nu fac parte din tabelul de joc) ---
 extern uint8_t  globalBattery[MAX_UNITS];
+extern uint8_t  cardSeq[MAX_UNITS];   // ultimul seq de puncte-card aplicat per unitate (filtru dublaj)
 extern uint32_t lastSeenTime[MAX_UNITS];
 
 // Construieste PageContext-ul din tabel.

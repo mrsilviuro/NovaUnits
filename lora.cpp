@@ -14,6 +14,7 @@ uint16_t loraTimeSyncSec = 0;   // secunda primita in TIME_SYNC
 uint8_t  loraEvtUnit     = 0;
 uint8_t  loraEvtTeam     = 0;
 int32_t  loraEvtPoints   = 0;
+uint8_t  loraEvtSeq      = 0;
 uint32_t lastLocalTick   = 0;
 bool     localTimePaused = false;
 bool     isSynced        = false;
@@ -31,6 +32,7 @@ uint8_t  syncedByUnit    = 0;
 #define RESPAWN_PKT_LEN 8       // [NET][TYPE][UNIT][team][kills_hi][kills_lo][SES][CRC]
 #define BOMB_PKT_LEN    6       // [NET][TYPE][UNIT][team][SES][CRC]
 #define KILLRESET_PKT_LEN 8     // [NET][TYPE][UNIT][winnerTeam][pts_hi][pts_lo][SES][CRC]
+#define CARDPTS_PKT_LEN   9     // [NET][TYPE][UNIT][team][pts_hi][pts_lo][seq][SES][CRC]
 #define HEARTBEAT_PKT_LEN 5     // [NET][TYPE][UNIT][SES][CRC] (bateria e deja in UNIT)
 #define TIME_SYNC_PKT_LEN 7     // [NET][TYPE][UNIT][sec_hi][sec_lo][SES][CRC]
 
@@ -408,6 +410,22 @@ void loraSendNeutralize(uint8_t team, int32_t points) {
     Serial.print(" pts="); Serial.println(p);
 }
 
+void loraSendCardPoints(uint8_t team, uint16_t points, uint8_t seq) {
+    if (!isSynced) return;
+    uint8_t buf[CARDPTS_PKT_LEN];
+    buf[0] = (uint8_t)NETWORK_ID;
+    buf[1] = PKT_CARDPTS;
+    buf[2] = unitByte();
+    buf[3] = team;
+    buf[4] = (points >> 8) & 0xFF;
+    buf[5] = points & 0xFF;
+    buf[6] = seq;
+    sealPacket(buf, CARDPTS_PKT_LEN);
+    loraQueueSendDup(buf, CARDPTS_PKT_LEN);
+    Serial.print("[LORA] CARDPTS pus in coada, team="); Serial.print(team);
+    Serial.print(" pts="); Serial.print(points); Serial.print(" seq="); Serial.println(seq);
+}
+
 void loraSendRespawn(uint8_t team, uint16_t totalKills) {
     if (!isSynced) return;
     uint8_t buf[RESPAWN_PKT_LEN];
@@ -489,6 +507,7 @@ LoraEvent loraPoll() {
         else if (rxBuf[1] >= PKT_TIME_START && rxBuf[1] <= PKT_TIME_RESET) rxLen = TIME_PKT_LEN;
         else if (rxBuf[1] == PKT_CAPTURE)    rxLen = CAPTURE_PKT_LEN;
         else if (rxBuf[1] == PKT_NEUTRALIZE) rxLen = NEUT_PKT_LEN;
+        else if (rxBuf[1] == PKT_CARDPTS)    rxLen = CARDPTS_PKT_LEN;
         else if (rxBuf[1] == PKT_RESPAWN)    rxLen = RESPAWN_PKT_LEN;
         else if (rxBuf[1] == PKT_BOMB_PLANT || rxBuf[1] == PKT_BOMB_DEFUSE) rxLen = BOMB_PKT_LEN;
         else if (rxBuf[1] == PKT_KILLRESET) rxLen = KILLRESET_PKT_LEN;
@@ -588,6 +607,21 @@ LoraEvent loraPoll() {
         loraEvtPoints = ((int32_t)rxBuf[4] << 8) | rxBuf[5];
         Serial.print("[LORA] NEUTRALIZE de la unit "); Serial.print(u); Serial.print(" pts="); Serial.println(loraEvtPoints);
         return LORA_EVT_NEUTRALIZE;
+    }
+
+    // --- CARDPTS: puncte de pe card ---
+    if (type == PKT_CARDPTS) {
+        if (!isSynced) return LORA_EVT_NONE;
+        uint8_t u = rxBuf[2] & 0x0F;
+        if (u == UNIT_ID) return LORA_EVT_NONE;
+        uint8_t batt = (rxBuf[2] >> 4) & 0x07;
+        if (u >= 1 && u <= MAX_UNITS) { globalBattery[u-1] = batt; lastSeenTime[u-1] = millis(); }
+        loraEvtUnit = u;
+        loraEvtTeam = rxBuf[3];
+        loraEvtPoints = ((int32_t)rxBuf[4] << 8) | rxBuf[5];
+        loraEvtSeq = rxBuf[6];
+        Serial.print("[LORA] CARDPTS de la unit "); Serial.print(u); Serial.print(" pts="); Serial.print(loraEvtPoints); Serial.print(" seq="); Serial.println(loraEvtSeq);
+        return LORA_EVT_CARDPTS;
     }
 
     if (type == PKT_RESPAWN) {

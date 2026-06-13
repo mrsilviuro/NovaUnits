@@ -49,7 +49,8 @@ uint8_t   adminScrollIndex  = 0;
 uint8_t   expImpIndex       = 0;    // 0=Export, 1=Import (sub-meniu Exp./Imp. Data)
 uint8_t    stateBlob[336];          // buffer serializare stare joc (export/import card)
 uint32_t   lastPingTime = 0;        // ultimul ping manual (pag.5) — filtru anti-spam 10s
-uint8_t    sessionId    = 0;        // sesiune de retea: filtreaza pachetele unitatilor straine
+uint8_t    sessionId    = 0;       // sesiune de retea: filtreaza pachetele unitatilor straine
+uint8_t    cardSeq[MAX_UNITS] = {0};  // contor scanari card per unitate (filtru dublaj)
 uint16_t   stateBlobLen     = 0;
 const char* exportResL1     = "";   // mesaj rezultat export (linia 1/2)
 const char* exportResL2     = "";
@@ -543,6 +544,8 @@ uint16_t buildExportBlob(uint8_t* b) {
     for (uint8_t u = 0; u < MAX_UNITS; u++)
         b[p++] = globalBattery[u];
 
+    b[p++] = sessionId;   // sesiunea de retea (ca unitatea importata sa comunice cu reteaua)
+
     // CRC16 peste tot ce am scris pana acum
     uint16_t crc = crc16(b, p);
     b[p++] = (crc >> 8) & 0xFF;
@@ -626,6 +629,8 @@ bool applyImportBlob(const uint8_t* b, uint16_t len) {
     }
     for (uint8_t u = 0; u < MAX_UNITS; u++)
         globalBattery[u] = b[p++];
+
+    sessionId = b[p++];   // adoptam sesiunea de retea de pe card
 
     // Unitate noua: e acum la curent si sincronizata; modul propriu se alege din nou
     selectedMode = -1;
@@ -784,6 +789,15 @@ void loop() {
             tone(PIN_BUZZER, 1500, 200);
             needsDisplayUpdate = true;
         }
+    } else if (ev == LORA_EVT_CARDPTS) {
+        uint8_t cu = loraEvtUnit - 1;
+        if (loraEvtSeq != cardSeq[cu]) {                       // filtru dublaj: copia a doua are acelasi seq -> ignorata
+            cardSeq[cu] = loraEvtSeq;
+            if (loraEvtTeam >= 1 && loraEvtTeam <= 4)
+                unitTable[cu].savedPoints[loraEvtTeam - 1] += loraEvtPoints;   // echipa X primeste +Y puncte
+                tone(PIN_BUZZER, 1200, 100);
+            needsDisplayUpdate = true;
+        }
     } else if (ev == LORA_EVT_TIME_SYNC) {
         if (isGameTimerRunning && !isGamePaused && currentWinCondition != WIN_BY_CONQUEST) {
             gameTimeLeftSeconds = loraTimeSyncSec;   // corectam drift-ul: snap la timpul maestrului
@@ -851,6 +865,8 @@ void loop() {
             } else if (rfidBurnTag()) {
                 // Cardul s-a ars cu succes -> acordam punctele echipei
                 myRow().savedPoints[owner - 1] += (int32_t)rfid.points;
+                cardSeq[UNIT_ID - 1]++;                                          // id unic pentru aceasta scanare
+                loraSendCardPoints(owner, (uint16_t)rfid.points, cardSeq[UNIT_ID - 1]);   // anuntam reteaua: echipa X +Y puncte
                 bonusPoints = rfid.points;
                 bonusTeam = owner;
                 bonusScreenStart = millis();
@@ -1321,6 +1337,14 @@ void loop() {
             }
             break;
 
+        case STATE_RESPAWN_DUP:
+            if (needsDisplayUpdate) { drawRespawnDupScreen(); needsDisplayUpdate = false; }
+            if (millis() - blockMsgStart >= 2000) {
+                currentState = blockReturnState;
+                needsDisplayUpdate = true;
+            }
+            break;
+
         case STATE_SYNCED:
             if (needsDisplayUpdate) { drawSyncedScreen(syncedByUnit); needsDisplayUpdate = false; }
             if (millis() - syncedScreenStart >= 2000) {
@@ -1574,15 +1598,30 @@ void onShortPress(uint8_t btnIndex) {
         }
 
     } else if (currentState == STATE_RESPAWN_SETUP) {
-        myRow().mode = 3;
-        myRow().team = (Team)(btnIndex + 1);
-        loraSendMode(3, (uint8_t)myRow().team);   // anuntam reteaua (respawn + echipa)
-        currentState = STATE_LOADING;
-        loadingStartTime = millis();
-        refreshLEDs();
-        needsDisplayUpdate = true;
-        Serial.print("[RESPAWN] Echipa selectata: ");
-        Serial.println(TEAM_NAMES[btnIndex]);
+        Team sel = (Team)(btnIndex + 1);
+        // Filtru: o echipa nu poate avea doua unitati de respawn in retea.
+        bool dupRespawn = false;
+        for (uint8_t u = 0; u < MAX_UNITS; u++) {
+            if (u == UNIT_ID - 1) continue;                       // pe noi ne sarim
+            if (unitTable[u].mode == 3 && unitTable[u].team == sel) { dupRespawn = true; break; }
+        }
+        if (dupRespawn) {
+            blockReturnState   = STATE_RESPAWN_SETUP;             // revine la alegerea echipei
+            blockMsgStart      = millis();
+            currentState       = STATE_RESPAWN_DUP;
+            needsDisplayUpdate = true;
+            tone(PIN_BUZZER, 300, 200);
+        } else {
+            myRow().mode = 3;
+            myRow().team = sel;
+            loraSendMode(3, (uint8_t)myRow().team);   // anuntam reteaua (respawn + echipa)
+            currentState = STATE_LOADING;
+            loadingStartTime = millis();
+            refreshLEDs();
+            needsDisplayUpdate = true;
+            Serial.print("[RESPAWN] Echipa selectata: ");
+            Serial.println(TEAM_NAMES[btnIndex]);
+        }
 
     } else if (currentState == STATE_PAGES) {
         if (btnIndex == 0) {            // ROSU — pagina anterioara

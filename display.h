@@ -161,3 +161,4 @@ void drawSyncedScreen(uint8_t fromUnitId);
 void drawSyncDoneScreen();
 void drawTimeAlertScreen(uint8_t action);
 void drawBlockedScreen();
+void drawRespawnDupScreen();

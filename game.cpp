@@ -287,3 +287,16 @@ void drawBlockedScreen() {
     display.print(l2);
     display.display();
 }
+
+void drawRespawnDupScreen() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "One team can't";
+    const char* l2 = "have two respawn";
+    const char* l3 = "units!";
+    uint8_t x;
+    x = (SCREEN_WIDTH - strlen(l1) * 6) / 2; display.setCursor(x, 16); display.print(l1);
+    x = (SCREEN_WIDTH - strlen(l2) * 6) / 2; display.setCursor(x, 28); display.print(l2);
+    x = (SCREEN_WIDTH - strlen(l3) * 6) / 2; display.setCursor(x, 40); display.print(l3);
+    display.display();
+}

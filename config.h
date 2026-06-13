@@ -61,6 +61,7 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
 #define PKT_KILLRESET   0x0D
 #define PKT_HEARTBEAT   0x0E
 #define PKT_TIME_SYNC   0x0F
+#define PKT_CARDPTS     0x10   // puncte de pe card: echipa X +Y puncte
 
 // ============================================================
 // DISPLAY OLED (2.42" SSD1309 condus de libraria SSD1306)
@@ -85,8 +86,8 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
   { 0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6 }
 #define RFID_MAGIC_BYTE 0x4E
 #define RFID_BLOCK_ADDR 4
-#define STATE_BLOB_VERSION 0x03   // versiune format export/import card
-#define STATE_BLOB_LEN     296     // lungimea blob-ului serializat
+#define STATE_BLOB_VERSION 0x04   // versiune format export/import card
+#define STATE_BLOB_LEN     297     // lungimea blob-ului serializat
 
 // ============================================================
 // ECHIPE & UNITATI
@@ -148,6 +149,7 @@ enum GameState : uint8_t {
   STATE_SYNC_DONE,
   STATE_TIME_ALERT,
   STATE_ADMIN_BLOCKED,
+  STATE_RESPAWN_DUP,
   STATE_POWER_OFF
 };
 
