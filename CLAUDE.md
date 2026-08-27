@@ -148,9 +148,14 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
 
 - **6 pagini de joc** (Roșu = înapoi, Albastru = înainte): 1 gameplay (se adaptează după mod),
   2 scoruri, 3 kill-uri, 4 status unități, 5 ping/radar + baterii, 6 info joc + start/pauză.
-  Verde are funcții contextuale: scroll pe 4/5, **reset scoruri pe 2**, reset kill-uri pe 3,
-  reset ceas pe 6. Cele trei resetări cer cardul de admin (fereastră de 3s) și trimit alertă
-  în rețea. **Resetul de scoruri e blocat doar cât timp jocul chiar rulează** — merge nepornit,
+  Verde are funcții contextuale: scroll pe 4/5, **eliberare unități pe 1**, **reset scoruri
+  pe 2**, reset kill-uri pe 3, reset ceas pe 6. Cele patru resetări cer cardul de admin
+  (fereastră de 3s) și trimit alertă în rețea; sunt independente între ele.
+  **Eliberarea unităților** (`PKT_FIELDRESET`) pregătește terenul pentru o rundă nouă:
+  sectoarele cucerite devin neutre, bombele armate sau în cooldown revin la IDLE (gata de
+  plantat), coada de respawn se golește pe fiecare unitate. **Rolurile rămân** — o unitate de
+  bombă rămâne unitate de bombă, una de respawn își păstrează echipa (echipa e rolul ei, nu
+  o stare) — iar scorurile și kill-urile nu se ating. Blocată doar cât timp jocul rulează. **Resetul de scoruri e blocat doar cât timp jocul chiar rulează** — merge nepornit,
   pe pauză, la time out și la game over (altfel „Can't do that while playing")
   și atinge doar punctele — `savedPoints`, `liveCapture` și `appliedPenalties` (acestea din
   urmă ca pagina 2 să nu arate scoruri negative); sectoarele rămân cucerite, bombele armate,

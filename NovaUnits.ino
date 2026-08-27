@@ -111,6 +111,9 @@ uint32_t   lastKillResetAt     = 0;   // dedup KILLRESET
 uint32_t   ptsResetAdminStart  = 0;   // fereastra de 3s 'prezinta cardul' (reset scoruri)
 uint32_t   ptsResetDoneStart   = 0;
 uint8_t    ptsResetSeq[MAX_UNITS] = {0};   // ultimul seq PTSRESET aplicat per unitate (filtru dublaj)
+uint32_t   fieldResetAdminStart = 0;   // fereastra de 3s 'prezinta cardul' (eliberare unitati)
+uint32_t   fieldResetDoneStart  = 0;
+uint8_t    fieldResetSeq[MAX_UNITS] = {0};   // ultimul seq FIELDRESET aplicat per unitate
 bool       timeSyncFreezing    = false; // maestrul: ingheata countdown-ul cat trimite TIME_SYNC
 
 // --- Card puncte (bonus) ---
@@ -526,6 +529,40 @@ void applyPointsReset() {
 }
 
 // ============================================================
+// applyFieldReset() — elibereaza unitatile de "responsabilitati"
+// Sectoarele cucerite devin neutre, bombele armate sau in cooldown revin la
+// IDLE (gata de plantat), coada de respawn se goleste.
+// ROLURILE raman: o unitate de bomba ramane unitate de bomba, una de respawn
+// isi pastreaza echipa. Scorurile si kill-urile NU se ating — au resetul lor
+// pe paginile 2 si 3.
+// ============================================================
+void applyFieldReset() {
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        if (unitTable[u].mode == 1) {            // sector -> neutru
+            unitTable[u].status     = SEC_NEUTRAL;
+            unitTable[u].team       = TEAM_NEUTRAL;
+            unitTable[u].actionTime = 0;
+            liveCapture[u]   = 0;                // punctele deja acordate raman in savedPoints
+            lastPointTick[u] = 0;
+        } else if (unitTable[u].mode == 2) {     // bomba -> ca si cum n-ar fi fost amorsata
+            unitTable[u].status     = BOMB_IDLE;
+            unitTable[u].team       = TEAM_NEUTRAL;
+            unitTable[u].actionTime = 0;
+        }
+        // mode == 3 (respawn): echipa e rolul unitatii, nu o stare -> ramane
+    }
+    // Coada de respawn e stare LOCALA (nu circula prin radio): fiecare unitate
+    // si-o goleste pe a ei cand primeste alerta.
+    queueCount = queueHead = queueTail = 0;
+    flashStep = 0;
+    isBombBeeping = false;
+    noTone(PIN_BUZZER);
+    refreshLEDs();
+    needsDisplayUpdate = true;
+    Serial.println("[FIELD] Unitati eliberate: sectoare neutre, bombe idle, coada golita!");
+}
+
+// ============================================================
 // doReboot() — ecran REBOOTING + beep continuu + restart
 // ============================================================
 void doReboot() {
@@ -915,6 +952,13 @@ void loop() {
             if (loraEvtSeq != ptsResetSeq[pu]) {   // filtru dublaj: copia a doua are acelasi seq
                 ptsResetSeq[pu] = loraEvtSeq;
                 applyPointsReset();
+                tone(PIN_BUZZER, 1500, 200);
+            }
+        } else if (ev == LORA_EVT_FIELDRESET) {
+            uint8_t fu = loraEvtUnit - 1;
+            if (loraEvtSeq != fieldResetSeq[fu]) {   // filtru dublaj: copia a doua are acelasi seq
+                fieldResetSeq[fu] = loraEvtSeq;
+                applyFieldReset();
                 tone(PIN_BUZZER, 1500, 200);
             }
         } else if (ev == LORA_EVT_TIME_SYNC) {
@@ -1368,6 +1412,46 @@ void loop() {
             break;
         }
 
+        case STATE_FIELD_RESET_ADMIN: {
+            if (needsDisplayUpdate) {
+                drawFieldResetAdminScreen();
+                needsDisplayUpdate = false;
+            }
+            // Timeout 3 secunde fara card -> inapoi pe pagina 1 + ton de fail
+            if (millis() - fieldResetAdminStart >= 3000) {
+                currentState = STATE_PAGES;
+                currentPage = 0;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 200, 300);
+                break;
+            }
+            if (millis() - lastRfidRead >= 100) {
+                RfidReadData rfid = rfidReadTag();
+                lastRfidRead = millis();
+                if (rfid.result == RFID_READ_ADMIN) {
+                    applyFieldReset();
+                    loraSendFieldReset();           // anuntam reteaua
+                    currentPage = 0;
+                    fieldResetDoneStart = millis();
+                    currentState = STATE_FIELD_RESET_DONE;
+                    needsDisplayUpdate = true;
+                    rfidIgnoreUntil = millis() + 2000;
+                    tone(PIN_BUZZER, 1500, 300);
+                } else if (rfid.result == RFID_READ_POINTS || rfid.result == RFID_READ_INVALID) {
+                    tone(PIN_BUZZER, 200, 300);     // card gresit
+                }
+            }
+            break;
+        }
+
+        case STATE_FIELD_RESET_DONE:
+            if (needsDisplayUpdate) { drawFieldResetDoneScreen(); needsDisplayUpdate = false; }
+            if (millis() - fieldResetDoneStart >= 2000) {
+                currentState = STATE_PAGES;
+                needsDisplayUpdate = true;
+            }
+            break;
+
         case STATE_PTS_RESET_ADMIN: {
             if (needsDisplayUpdate) {
                 drawPointsResetAdminScreen();
@@ -1791,7 +1875,23 @@ void onShortPress(uint8_t btnIndex) {
             currentPage = (currentPage >= 5) ? 0 : currentPage + 1;
             needsDisplayUpdate = true;
         } else if (btnIndex == 2) {     // VERDE — scroll pe paginile 4 si 5
-            if (currentPage == 1) {
+            if (currentPage == 0) {
+                // PAGE 1 — VERDE: eliberarea unitatilor (sectoare neutre, bombe idle,
+                // coada de respawn golita). Ca la resetul de scoruri: permis cand jocul
+                // NU ruleaza, confirmat cu cardul de admin, difuzat in toata reteaua.
+                if (gameplayRunning()) {
+                    blockReturnState = STATE_PAGES;
+                    blockMsgStart = millis();
+                    currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else {
+                    fieldResetAdminStart = millis();
+                    currentState = STATE_FIELD_RESET_ADMIN;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1000, 100);
+                }
+            } else if (currentPage == 1) {
                 // PAGE 2 — VERDE: reset scoruri. Permis cand jocul NU ruleaza:
                 // nepornit, pe pauza, time out sau game over. Doar in joc e blocat —
                 // atunci unitatile emit si alerta s-ar putea ciocni de alt trafic.
