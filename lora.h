@@ -26,7 +26,7 @@ extern uint8_t rsTimeIdx, rsPenaltyIdx;
 extern uint8_t rsLimitIdx[4];
 
 // Evenimente intoarse de loraPoll()
-enum LoraEvent : uint8_t { LORA_EVT_NONE = 0, LORA_EVT_SYNC = 1, LORA_EVT_RESTART = 2, LORA_EVT_TIME = 3, LORA_EVT_CAPTURE = 4, LORA_EVT_NEUTRALIZE = 5, LORA_EVT_RESPAWN = 6, LORA_EVT_BOMB_PLANT = 7, LORA_EVT_BOMB_DEFUSE = 8, LORA_EVT_KILLRESET = 9, LORA_EVT_TIME_SYNC = 10, LORA_EVT_CARDPTS = 11, LORA_EVT_PTSRESET = 12 };
+enum LoraEvent : uint8_t { LORA_EVT_NONE = 0, LORA_EVT_SYNC = 1, LORA_EVT_RESTART = 2, LORA_EVT_TIME = 3, LORA_EVT_CAPTURE = 4, LORA_EVT_NEUTRALIZE = 5, LORA_EVT_RESPAWN = 6, LORA_EVT_BOMB_PLANT = 7, LORA_EVT_BOMB_DEFUSE = 8, LORA_EVT_KILLRESET = 9, LORA_EVT_TIME_SYNC = 10, LORA_EVT_CARDPTS = 11, LORA_EVT_PTSRESET = 12, LORA_EVT_FIELDRESET = 13 };
 extern uint8_t loraEvtUnit;     // unitatea sursa (1..12) pt CAPTURE/NEUTRALIZE
 extern uint8_t loraEvtTeam;     // echipa (1..4)
 extern int32_t loraEvtPoints;   // puncte exacte (NEUTRALIZE) / Y puncte (CARDPTS)
@@ -54,6 +54,7 @@ bool loraHeartbeatDue();                                  // true cand e timpul 
 extern uint8_t sessionId;   // sesiune de retea (1 octet, 0 = fara sesiune / unitate proaspata)
 void loraSendCardPoints(uint8_t team, uint16_t points, uint8_t seq);   // alerta puncte de card
 void loraSendPointsReset();                               // alerta reset scoruri (seq propriu, fara fereastra de timp)
+void loraSendFieldReset();                                // alerta eliberare unitati (seq propriu)
 void loraSendHeartbeat(bool dup = true);                  // keep-alive simplu (dup=false -> o singura alerta)
 void loraSendTimeSync(uint16_t sec);                      // corectie de timp de la maestru (single send)
 LoraEvent loraPoll();                                     // citeste UART; intoarce evenimentul primit (deja aplicat)

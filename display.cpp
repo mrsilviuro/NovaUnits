@@ -1510,6 +1510,41 @@ void drawPointsResetDoneScreen() {
     display.display();
 }
 
+// ============================================================
+// Ecrane Field Reset (pagina 1 -> VERDE, confirmat cu cardul de admin)
+// ============================================================
+void drawFieldResetAdminScreen() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "Release all units";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
+    display.setCursor(x, 14);
+    display.print(l1);
+    const char* l2 = "Please present";
+    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
+    display.setCursor(x, 32);
+    display.print(l2);
+    const char* l3 = "Admin tag ...";
+    x = (SCREEN_WIDTH - (strlen(l3) * 6)) / 2;
+    display.setCursor(x, 44);
+    display.print(l3);
+    display.display();
+}
+
+void drawFieldResetDoneScreen() {
+    display.clearDisplay();
+    display.setTextSize(2);
+    const char* l1 = "UNITS";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 12)) / 2;
+    display.setCursor(x, 15);
+    display.print(l1);
+    const char* l2 = "RELEASED";
+    x = (SCREEN_WIDTH - (strlen(l2) * 12)) / 2;
+    display.setCursor(x, 37);
+    display.print(l2);
+    display.display();
+}
+
 void drawBonusScreen(uint16_t points, uint8_t teamIndex) {
     display.clearDisplay();
     display.setTextSize(2);

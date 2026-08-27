@@ -151,6 +151,10 @@ void drawKillResetDoneScreen(uint16_t points, uint8_t teamIndex, bool hasPoints)
 void drawPointsResetAdminScreen();
 void drawPointsResetDoneScreen();
 
+// Ecrane Field Reset — eliberarea unitatilor (pagina 1, buton VERDE)
+void drawFieldResetAdminScreen();
+void drawFieldResetDoneScreen();
+
 void drawBonusScreen(uint16_t points, uint8_t teamIndex);
 
 // Ecrane Sync (LoRa)
