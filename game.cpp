@@ -39,9 +39,24 @@ bool         isGamePaused        = false;
 uint32_t     gameOverTime        = 0;
 uint32_t     pauseStartTime      = 0;
 
+uint32_t     gameFreezeStart     = 0;
+
 // Comunicatii
 uint8_t  globalBattery[MAX_UNITS] = {0};
 uint32_t lastSeenTime[MAX_UNITS]  = {0};
+
+// ============================================================
+// Inghetarea cronometrelor de gameplay
+// ============================================================
+bool gameplayRunning() {
+    return isGameTimerRunning && !isGamePaused && !isTimeOut;
+}
+
+// Referinta de "acum" pentru sector/bomba/respawn. Cat timp jocul nu ruleaza
+// intoarce momentul inghetarii, deci (gameTimeRef() - actionTime) ramane fix.
+uint32_t gameTimeRef() {
+    return gameplayRunning() ? millis() : gameFreezeStart;
+}
 
 // ============================================================
 // Scor prin INSUMARE peste tabel
@@ -91,6 +106,7 @@ void buildContext(PageContext& ctx, uint8_t currentPage, uint8_t batteryPercent,
     ctx.isGamePaused       = isGamePaused;
     ctx.pauseStartTime     = pauseStartTime;
     ctx.gameOverTime       = gameOverTime;
+    ctx.timeRef            = gameTimeRef();
 
     // Sector (din randul propriu)
     ctx.sectorOwner          = (r.mode == 1 && r.status == SEC_CAPTURED) ? r.team : TEAM_NEUTRAL;

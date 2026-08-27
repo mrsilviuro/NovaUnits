@@ -31,6 +31,7 @@ struct PageContext {
     bool    isGamePaused;
     uint32_t pauseStartTime;
     uint32_t gameOverTime;
+    uint32_t timeRef;        // 'acum' pentru cronometrele de gameplay (inghetat cand jocul nu ruleaza)
     // Sector
     Team    sectorOwner;
     uint32_t captureStartTime;

@@ -370,32 +370,41 @@ void applyGamePause() {
 }
 
 // ------------------------------------------------------------
-// unfreezeAfterPause() — dezgheata reperele absolute dupa o pauza.
-// Pauza NU opreste millis(): pe durata ei calculele sunt doar ignorate.
-// Ca timpul scurs (now - actionTime) sa reia de unde a ramas, toti timpii
-// "de start" trebuie impinsi inainte cu durata pauzei.
-// Apelata si de RESUME, si de RESET-ul de ceas dat din pauza.
+// shiftGameplayTimers() — impinge inainte cu 'd' reperele de GAMEPLAY.
+// millis() nu se opreste niciodata; cat timp jocul nu ruleaza calculele sunt
+// doar ignorate, iar la repornire toti timpii "de start" trebuie mutati cu
+// exact cat a stat jocul, ca timpul scurs sa reia de unde a ramas.
+// Apelata din detectorul de tranzitie din loop() — vezi acolo.
 // ------------------------------------------------------------
-static void unfreezeAfterPause() {
-    uint32_t pauseDuration = millis() - pauseStartTime;
-    if (isGameTimerRunning)      lastTimerTick += pauseDuration;
-    // sectoare cucerite (toate unitatile): ajustam actionTime + tick
+static void shiftGameplayTimers(uint32_t d) {
+    if (d == 0) return;
     for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        // sectoare cucerite: actionTime (timp de detinere + bonus) si tick-ul de 10s
         if (unitTable[u].mode == 1 && unitTable[u].status == SEC_CAPTURED) {
-            if (unitTable[u].actionTime > 0) unitTable[u].actionTime += pauseDuration;
-            if (lastPointTick[u] > 0)        lastPointTick[u] += pauseDuration;
+            if (unitTable[u].actionTime > 0) unitTable[u].actionTime += d;
+            if (lastPointTick[u] > 0)        lastPointTick[u]        += d;
         }
-    }
-    // bombe (toate unitatile, arm/cooldown): ajustam actionTime
-    for (uint8_t u = 0; u < MAX_UNITS; u++) {
-        if (unitTable[u].mode == 2 && (unitTable[u].status == BOMB_ARMED || unitTable[u].status == BOMB_COOLDOWN) && unitTable[u].actionTime > 0)
-            unitTable[u].actionTime += pauseDuration;
+        // bombe armate sau in cooldown
+        if (unitTable[u].mode == 2 &&
+            (unitTable[u].status == BOMB_ARMED || unitTable[u].status == BOMB_COOLDOWN) &&
+            unitTable[u].actionTime > 0)
+            unitTable[u].actionTime += d;
     }
     for (uint8_t i = 0; i < queueCount; i++) {
         uint8_t idx = (queueHead + i) % 100;
-        respawnQueue[idx] += pauseDuration;
+        respawnQueue[idx] += d;
     }
-    // momentele ultimelor alerte: pastram timpul scurs inghetat pe durata pauzei
+}
+
+// ------------------------------------------------------------
+// unfreezeAfterPause() — partea specifica PAUZEI: ceasul de joc si
+// momentele ultimelor alerte radio. Cronometrele de gameplay NU sunt aici:
+// ele se dezgheata la START/RESUME prin detectorul de tranzitie din loop(),
+// pentru ca stau pe loc si intre un RESET de ceas si urmatorul START.
+// ------------------------------------------------------------
+static void unfreezeAfterPause() {
+    uint32_t pauseDuration = millis() - pauseStartTime;
+    if (isGameTimerRunning) lastTimerTick += pauseDuration;
     for (uint8_t u = 0; u < MAX_UNITS; u++) {
         if (lastSeenTime[u] != 0) lastSeenTime[u] += pauseDuration;
     }
@@ -431,9 +440,8 @@ void applyTimerAction(uint8_t action) {
         applyGameResume();
     } else if (action == 3) {     // RESET CEAS
         // Resetul e permis din pauza (meciuri rapide: runda noua, scoruri pastrate).
-        // Dezghetam intai reperele, altfel sectoarele/bombele/coada ar "recupera"
-        // toata durata pauzei: sectorul ar primi zeci de tick-uri de 10s deodata,
-        // iar o bomba armata ar exploda instantaneu.
+        // Recuperam ceasul si reperele radio; cronometrele de gameplay RAMAN
+        // inghetate (jocul nu ruleaza dupa reset) si repornesc abia la START.
         if (isGamePaused) unfreezeAfterPause();
         gameTimeLeftSeconds = gameTimeLimitSeconds;
         isGameTimerRunning  = false;
@@ -529,8 +537,8 @@ uint16_t buildExportBlob(uint8_t* b) {
     uint8_t flags = (isGameTimerRunning ? 0x01 : 0) | (isGamePaused ? 0x02 : 0) | (isTimeOut ? 0x04 : 0);
     b[p++] = flags;
     b[p++] = (uint8_t)conquestWinner;
-    // referinta de timp pentru durata tinuta (frozen pe pauza)
-    uint32_t ref = isGamePaused ? pauseStartTime : millis();
+    // referinta de timp pentru durata tinuta (inghetata cat timp jocul nu ruleaza)
+    uint32_t ref = gameTimeRef();
     // faza timerului de joc (ms in secunda curenta) -> aliniere countdown pe unitatea noua
     uint32_t tphRaw = ((int32_t)(ref - lastTimerTick) > 0) ? (ref - lastTimerTick) : 0;
     uint16_t timerPhase = (tphRaw > 65535) ? 65535 : (uint16_t)tphRaw;
@@ -680,9 +688,26 @@ bool applyImportBlob(const uint8_t* b, uint16_t len) {
 
     sessionId = b[p++];   // adoptam sesiunea de retea de pe card
 
-    // Unitate noua: e acum la curent si sincronizata; modul propriu se alege din nou
-    selectedMode = -1;
-    isSynced     = true;
+    // Rolul propriu vine tot de pe card: randul nostru din tabel spune ce mod avea
+    // unitatea in retea si — pentru sector/bomba — daca era cucerita/armata si de
+    // cine. Starea si timpii au fost deja reconstruiti mai sus, aici doar aliniem
+    // 'selectedMode' cu randul, ca unitatea sa intre direct in rol dupa import.
+    switch (myRow().mode) {
+        case 1:  selectedMode = 0; break;   // Sector
+        case 2:  selectedMode = 1; break;   // Bomb
+        case 3:  selectedMode = 2; break;   // Respawn
+        default: selectedMode = -1; break;  // cardul nu ne stie niciun rol -> se alege din meniu
+    }
+
+    // Coada de respawn NU circula pe card (doar totalul de kill-uri), deci
+    // unitatea care preia rolul porneste cu coada goala.
+    queueCount = queueHead = queueTail = 0;
+
+    // Cronometrele de gameplay repornesc de la momentul importului: daca starea
+    // importata nu ruleaza, raman inghetate de aici pana la START/RESUME.
+    gameFreezeStart = now;
+
+    isSynced = true;
     return true;
 }
 
@@ -695,6 +720,9 @@ void setup() {
 
     // Seed per-unitate pentru jitter-ul copiei a doua (UNIT_ID garanteaza secvente diferite)
     randomSeed(micros() ^ ((uint32_t)UNIT_ID * 2654435761UL));
+
+    // Cronometrele de gameplay pornesc inghetate: jocul nu ruleaza la boot
+    gameFreezeStart = millis();
 
     // Power latch — tinem alimentarea pornita
     pinMode(PIN_LATCH, OUTPUT);
@@ -980,8 +1008,31 @@ void loop() {
         }
     }
 
+    // ============================================================
+    // Inghetarea cronometrelor de gameplay.
+    // Un singur detector de front, plasat dupa tot ce poate schimba starea
+    // jocului in aceasta iteratie (alerte LoRa, timeout, conquest) si inainte
+    // de cronometrele propriu-zise. Prinde ORICE traseu — buton local, alerta
+    // radio, import de card — fara sa fie nevoie de apeluri imprastiate.
+    //   joc oprit  -> retinem momentul inghetarii
+    //   joc pornit -> impingem reperele cu exact cat a stat pe loc
+    // ============================================================
+    {
+        static bool wasRunning = false;
+        bool running = gameplayRunning();
+        if (running != wasRunning) {
+            if (running) {                                             // START / RESUME
+                int32_t d = (int32_t)(now - gameFreezeStart);          // wraparound-safe
+                shiftGameplayTimers((d > 0) ? (uint32_t)d : 0);
+            } else {
+                gameFreezeStart = now;                                 // PAUSE / RESET / TIME OUT
+            }
+            wasRunning = running;
+        }
+    }
+
     // Sector — puncte LIVE per unitate cucerita (3 + bonus la fiecare 10s)
-    if (!isTimeOut && !isGamePaused) {
+    if (gameplayRunning()) {
         for (uint8_t u = 0; u < MAX_UNITS; u++) {
             if (unitTable[u].mode == 1 && unitTable[u].status == SEC_CAPTURED && unitTable[u].team != TEAM_NEUTRAL) {
                 if (lastPointTick[u] == 0 || lastPointTick[u] > now) lastPointTick[u] = now;   // clamp: evita underflow
@@ -1004,7 +1055,7 @@ void loop() {
     }
 
     // Timer bomba + beep accelerat + explozie
-    if (selectedMode == 1 && myRow().status == BOMB_ARMED && !isGamePaused && !isTimeOut) {
+    if (selectedMode == 1 && myRow().status == BOMB_ARMED && gameplayRunning()) {
         uint32_t elapsed = now - myRow().actionTime;
         uint32_t remaining = (elapsed < bombTimerMs) ? (bombTimerMs - elapsed) : 0;
 
@@ -1050,7 +1101,7 @@ void loop() {
     }
 
     // Cooldown terminat
-    if (selectedMode == 1 && myRow().status == BOMB_COOLDOWN && !isGamePaused && !isTimeOut) {
+    if (selectedMode == 1 && myRow().status == BOMB_COOLDOWN && gameplayRunning()) {
         if (now - myRow().actionTime >= cooldownMs) {
             myRow().status = BOMB_IDLE;
             Serial.println("[BOMB] Cooldown terminat.");
@@ -1058,7 +1109,7 @@ void loop() {
     }
 
     // Bombe de pe ALTE unitati: explozie + cooldown autonom (doar tabel + scor, fara efecte locale)
-    if (!isGamePaused && !isTimeOut) {
+    if (gameplayRunning()) {
         for (uint8_t u = 0; u < MAX_UNITS; u++) {
             if (u == UNIT_ID - 1 || unitTable[u].mode != 2) continue;
             if (unitTable[u].status == BOMB_ARMED) {
@@ -1082,7 +1133,7 @@ void loop() {
     }
 
     // Respawn — iesire din coada + animatie flash
-    if (selectedMode == 2 && queueCount > 0 && !isGamePaused && !isTimeOut) {
+    if (selectedMode == 2 && queueCount > 0 && gameplayRunning()) {
         if (now >= respawnQueue[queueHead]) {
             queueCount--;
             queueHead = (queueHead + 1) % 100;
@@ -1447,6 +1498,13 @@ void loop() {
                 if (ir == IMPORT_OK) {
                     if (applyImportBlob(stateBlob, STATE_BLOB_LEN)) {
                         importResL1 = "Import"; importResL2 = "OK";
+                        // La iesirea din admin mergem unde are sens: in joc daca
+                        // unitatea si-a reluat rolul de pe card, altfel la selectia
+                        // de mod (fara rol, "Change Mode" nici nu apare in meniu).
+                        previousStateBeforeAdmin = (selectedMode == -1) ? STATE_MENU : STATE_PAGES;
+                        currentPage = 0;
+                        menuIndex   = 0;
+                        refreshLEDs();
                         tone(PIN_BUZZER, 1800, 400);
                     } else {
                         importResL1 = "Import"; importResL2 = "FAILED";   // magic/versiune/CRC invalide
