@@ -48,7 +48,12 @@ Codul depinde de ordinea asta; mai multe „ciudatenii" din el se explica doar p
    alerta de reset nu se ciocneste de alt trafic (modulele nu au listen-before-talk si nu
    pot emite si asculta simultan). Foloseste la meciuri rapide/SQB: runda noua cu ceas
    resetat, dar cu scorurile pastrate. **Resetul atinge doar ceasul, nu si starea de joc** —
-   sectoarele raman cucerite si continua sa produca puncte.
+   sectoarele raman cucerite, bombele raman armate, dar toate cronometrele stau pe loc
+   pana la urmatorul START.
+5. **Import de pe card = unitatea preia si rolul.** Randul propriu din tabelul de pe card
+   spune ce mod avea unitatea in retea si, pentru sector/bomba, daca era cucerita/armata
+   si de cine — deci dupa import intra direct in rol. Coada de respawn nu circula pe card,
+   deci porneste goala. Daca pe card unitatea n-are niciun rol, se cere selectia de mod.
 
 ## Modelul de joc
 
@@ -158,11 +163,19 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   sunt mașini de stări cu `millis()`.
 - Comparațiile de timp folosesc diferențe cast-uite la `int32_t` acolo unde valorile pot fi
   „subcurse" după import — păstrează pattern-ul, nu-l simplifica la `a > b`.
-- **Pauza nu oprește `millis()`.** Pe durata ei calculele sunt doar ignorate; la ieșirea din
-  pauză `unfreezeAfterPause()` împinge înainte cu durata pauzei toate reperele absolute
-  (`actionTime`, `lastPointTick[]`, `respawnQueue[]`, `lastSeenTime[]`, `lastTimerTick`).
-  **Orice traseu nou care stinge `isGamePaused` trebuie să apeleze întâi funcția asta** —
-  altfel sectoarele recuperează zeci de tick-uri deodată și bombele explodează instantaneu.
+- **`millis()` nu se oprește niciodată — cronometrele „îngheață" prin compensare.**
+  `gameplayRunning()` (`isGameTimerRunning && !isGamePaused && !isTimeOut`) spune dacă
+  sectorul/bomba/respawn-ul au voie să avanseze. Un singur **detector de front** în `loop()`
+  reține `gameFreezeStart` când jocul se oprește și, la START/RESUME, împinge înainte cu
+  exact acel interval toate reperele de gameplay (`shiftGameplayTimers()`). Prinde orice
+  traseu — buton, alertă radio, import — deci **nu adăuga apeluri de dezghețare pe trasee
+  noi**; e de ajuns ca `gameplayRunning()` să reflecte realitatea.
+- **Pentru desen folosește `ctx.timeRef`, nu `millis()`.** `gameTimeRef()` întoarce
+  `millis()` cât timp jocul rulează și momentul înghețării în rest, deci
+  `timeRef - actionTime` rămâne fix cu jocul oprit. `pauseStartTime` a rămas doar pentru
+  lucrurile legate de radio (`lastSeenTime[]`, fereastra de 15s de la Exp./Imp.).
+- `unfreezeAfterPause()` acoperă acum **doar** partea de pauză (ceasul de joc și reperele
+  radio); cronometrele de gameplay sunt treaba detectorului de front.
 
 ## Lucruri de știut înainte să modifici
 

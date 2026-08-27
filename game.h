@@ -66,6 +66,14 @@ extern bool         isGamePaused;
 extern uint32_t     pauseStartTime;
 extern uint32_t     gameOverTime;
 
+// --- Inghetarea cronometrelor de gameplay ---
+// Sectorul, bomba si coada de respawn avanseaza DOAR cat timp jocul chiar ruleaza.
+// Inainte de START, dupa un RESET de ceas, pe pauza si dupa TIME OUT ele stau pe loc;
+// timpul scurs se reia de unde a ramas la urmatorul START/RESUME.
+extern uint32_t gameFreezeStart;   // millis() cand cronometrele au inghetat
+bool     gameplayRunning();        // cronometrele de gameplay avanseaza acum?
+uint32_t gameTimeRef();            // 'now' pentru orice calcul de gameplay (inghetat cand nu rulam)
+
 // --- Comunicatii (meta, nu fac parte din tabelul de joc) ---
 extern uint8_t  globalBattery[MAX_UNITS];
 extern uint8_t  cardSeq[MAX_UNITS];   // ultimul seq de puncte-card aplicat per unitate (filtru dublaj)

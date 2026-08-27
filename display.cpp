@@ -449,9 +449,7 @@ void drawPages(const PageContext& ctx) {
                     display.setCursor(x, 51);
                     display.print(l4);
                 } else {
-                    uint32_t el = ctx.isGamePaused
-                    ? (ctx.pauseStartTime - ctx.captureStartTime)
-                    : (millis() - ctx.captureStartTime);
+                    uint32_t el = ctx.timeRef - ctx.captureStartTime;   // inghetat cand jocul nu ruleaza
                     uint8_t h = el / 3600000;
                     uint8_t m = (el % 3600000) / 60000;
                     uint8_t s = (el % 60000) / 1000;
@@ -507,8 +505,8 @@ void drawPages(const PageContext& ctx) {
                     display.setTextSize(1);
                 } else {
                     if (ctx.isCooldownActive) {
-                        uint32_t el = millis() - ctx.cooldownStartTime;
-                        uint32_t rem = ctx.cooldownMs - el;
+                        uint32_t el = ctx.timeRef - ctx.cooldownStartTime;
+                        uint32_t rem = (el < ctx.cooldownMs) ? (ctx.cooldownMs - el) : 0;
                         uint8_t m = rem / 60000;
                         uint8_t s = (rem % 60000) / 1000;
                         char timeBuf[10];
@@ -519,8 +517,8 @@ void drawPages(const PageContext& ctx) {
                         display.print(timeBuf);
                         display.setTextSize(1);
                     } else if (ctx.isBombArmed) {
-                        uint32_t el = millis() - ctx.bombPlantTime;
-                        uint32_t rem = ctx.bombTimerMs - el;
+                        uint32_t el = ctx.timeRef - ctx.bombPlantTime;
+                        uint32_t rem = (el < ctx.bombTimerMs) ? (ctx.bombTimerMs - el) : 0;
                         uint8_t m = rem / 60000;
                         uint8_t s = (rem % 60000) / 1000;
                         uint8_t ms = (rem % 1000) / 10;
@@ -594,7 +592,7 @@ void drawPages(const PageContext& ctx) {
                     if (ctx.queueCount > 0) {
                         display.setTextSize(2);
                         uint32_t rem = 0;
-                        if (ctx.respawnQueue[0] > millis()) rem = (ctx.respawnQueue[0] - millis()) / 1000;
+                        if (ctx.respawnQueue[0] > ctx.timeRef) rem = (ctx.respawnQueue[0] - ctx.timeRef) / 1000;
                         char timeBuf[10];
                         snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u", rem / 60, rem % 60);
                         uint8_t x = (SCREEN_WIDTH - (strlen(timeBuf) * 12)) / 2;
@@ -748,8 +746,7 @@ void drawPages(const PageContext& ctx) {
                 char timeStr[15] = "";
                 bool hasTime = false;
                 if (ctx.globalEventTime[i] > 0) {
-                    uint32_t refNow = ctx.isGamePaused ? ctx.pauseStartTime : (ctx.isTimeOut ? ctx.gameOverTime : now);
-                    int32_t  elDiff = (int32_t)(refNow - ctx.globalEventTime[i]);   // wraparound-safe (timp 'subcurs' dupa import)
+                    int32_t  elDiff = (int32_t)(ctx.timeRef - ctx.globalEventTime[i]);   // wraparound-safe (timp 'subcurs' dupa import)
                     uint32_t el = (elDiff > 0) ? ((uint32_t)elDiff) / 1000 : 0;
                     uint32_t tgt = 0;
                     bool active = true;
@@ -1097,7 +1094,10 @@ void drawImportWait() {
 void drawAdminPages(const AdminContext& ac) {
     display.clearDisplay();
     display.setTextSize(1);
-    const char* const items[9] = {"Game Settings", "Bomb Parameters", "Respawn Rules", "Sync Units", "TAG Writer", "Imp. / Exp. Data", "Change Mode", "System Restart", "Power Off"};
+    // Titlurile celor 4 SUB-PAGINI (0=Game, 1=Bomb, 2=Respawn, 3=TagWriter).
+    // Atentie: NU e lista meniului admin — acolo indicele 3 e "Sync Units",
+    // de aceea pagina TAG Writer se afisa cu titlul gresit.
+    const char* const items[4] = {"Game Settings", "Bomb Parameters", "Respawn Rules", "TAG Writer"};
     if (ac.selectedPage == 0) {
         // --- GAME SETTINGS ---
         const char* const wcT[] = {"By Points", "By Conquest", "By Any"};
