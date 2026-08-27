@@ -148,3 +148,214 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
 - WiFi și Bluetooth sunt oprite explicit în `setup()` (consum + stabilitate radio).
 - Power latch pe GPIO17: unitatea își ține singură alimentarea; „Power Off" pulsează pinul LOW.
 - Releul e `OUTPUT_OPEN_DRAIN`, **activ pe LOW**.
+
+- # NOVA Units — ghid de proiect (CLAUDE.md)
+
+Sistem electronic de management al jocurilor de airsoft, construit pe ESP32.
+Fiecare unitate e o „cutie" autonomă (Pelican-style) care poate fi sector de
+capturat, bombă sau punct de respawn. Unitățile comunică între ele prin LoRa
+(433 MHz), fără infrastructură centrală — fiecare unitate ține o copie a stării
+întregii rețele. Proiect personal, cod scris de la zero.
+
+- **Repo:** https://github.com/mrsilviuro/NovaUnits (branch `main`)
+- **Platformă:** ESP32 + Arduino / C++
+- **Unități fizice de test:** ID 1, 2, 4 (din maxim `MAX_UNITS = 12`)
+
+---
+
+## Convenții de cod (OBLIGATORII)
+
+- **Comentarii în română, FĂRĂ diacritice.** Tot codul nou respectă asta.
+- **RAM-only.** Nu se scrie în flash/EEPROM în timpul jocului (uzura flash-ului).
+- **Fără alocare dinamică, fără `String`.** Doar buffere statice, tipuri fixe.
+- **Non-blocking peste tot.** Mașini de stare, nu `delay()`. Excepție unică
+  istorică: trimiterea blocantă de SYNC (`loraSendSyncBlocking`), care îngheață
+  intenționat ceasul local cât ține transmisia.
+- **WiFi + Bluetooth dezactivate în `setup()`** (`esp_wifi_stop()`,
+  `esp_bt_controller_disable()`) — economie de energie + curățenie RF.
+- Preferă tipuri explicite (`uint8_t`, `int32_t`) și verifică `sizeof` la orice
+  `memcpy`.
+
+---
+
+## Structura fișierelor
+
+| Fișier          | Rol |
+|-----------------|-----|
+| `NovaUnits.ino` | Loop principal, mașina de stare a UI, handlerele de butoane, evenimentele LoRa consumate, baterie, export/import blob, globale. |
+| `config.h`      | Constante hardware (pini), `MAX_UNITS`, coduri de pachet `PKT_*`, enum de stări `STATE_*`, nume echipe/unități, versiune+lungime blob. |
+| `game.h/.cpp`   | Modelul de joc: `UnitRow`, `unitTable`, `teamScore`, `buildContext`, ecrane utilitare (`drawBlockedScreen`, etc.), globale de stare (`isGamePaused`, `savedPoints`...). |
+| `lora.h/.cpp`   | Protocolul LoRa: build + parse pachete, `sealPacket`, coada de TX (`loraQueueSend`/`Dup`), heartbeat, sesiune. |
+| `display.h/.cpp`| Randarea paginilor (SSD1309), iconițe, layout. |
+| `buttons.h/.cpp`| Debounce + short/long press. |
+| `rfid.h/.cpp`   | PN532 (SPI): admin tag, carduri de puncte, export/import stare pe card. |
+
+---
+
+## Model de bază (stare de joc)
+
+```c
+struct UnitRow { uint8_t mode; uint8_t status; Team team;
+                 uint32_t actionTime; int32_t savedPoints[4]; uint16_t kills[4]; };
+UnitRow unitTable[MAX_UNITS];        // starea INTREGII retele, replicata local
+#define myRow() unitTable[UNIT_ID-1] // randul acestei unitati
+```
+
+- `mode`: 0 = none, 1 = sector, 2 = bomba, 3 = respawn.
+  (Atentie: `selectedMode` din meniu e 0/1/2 → se mapeaza la `mode` 1/2/3.)
+- `status`: sector → `SEC_NEUTRAL=0` / `SEC_CAPTURED=1`; bomba → `BOMB_IDLE=0` /
+  `BOMB_ARMED=1` / `BOMB_COOLDOWN=2`.
+- `Team`: `TEAM_NEUTRAL=0`, apoi echipele 1-4 (`Phantoms`, `Sentinels`,
+  `Falcons`, `Nemesis`).
+
+Globale importante (în `NovaUnits.ino` / `game.cpp`): `savedPoints` (in `UnitRow`),
+`appliedPenalties[4]`, `liveCapture[12]`, `lastPointTick[12]`, `lastSeenTime[12]`
+(uint32), `globalBattery[12]` (uint8, 0-4 bare), `cardSeq[12]` (dedup puncte-card),
+`sessionId`, `batteryPercent` (0-100).
+
+---
+
+## Scorare
+
+- `teamScore(t)` = **suma** `savedPoints[t]` din toate rândurile `unitTable`
+  (+ captura live locală). `liveScore[t]` e **derivat** din `teamScore` în
+  `buildContext` — nu se stochează separat.
+- **Nu există reconciliere periodică de scor.** Scorurile se propagă EXCLUSIV
+  prin pachetele de eveniment care actualizează `unitTable` (CAPTURE, NEUTRALIZE,
+  BOMB, RESPAWN, KILLRESET, CARDPTS). Dacă un eveniment nu e difuzat, ceilalți
+  nu-l văd niciodată.
+- **Fiecare unitate face „tick" local pe TOATE sectoarele capturate** (nu doar
+  ale ei). Deci `savedPoints` pentru o unitate ar trebui sa fie identic pe toate
+  device-urile, cu conditia ca toate evenimentele non-deterministe (capturi,
+  neutralizari, puncte de card) sa fie difuzate.
+- Afișaj (pagina 2): `liveScore - appliedPenalties` (poate fi negativ, `%ld`).
+
+---
+
+## Timer & Pauză
+
+- `gameTimeLeftSeconds` numărat în jos, gated pe `!isGamePaused && !isTimeOut`.
+- **Disciplina timerului:** `lastTimerTick += 1000`, NICIODATĂ `= now`
+  (altfel drift/drenaj rapid pe tick învechit).
+- `gameActive = isGameTimerRunning && !isGamePaused && !isTimeOut` — „jocul chiar
+  rulează".
+- `applyGamePause()` doar setează flag-ul + `pauseStartTime` (NU decalează timpi).
+- `applyGameResume()` decalează TOȚI timpii absoluți cu `pauseDuration`
+  (`lastTimerTick`, `actionTime`, `lastPointTick`, `respawnQueue`, `lastSeenTime`).
+- RESUME poartă `gameTimeLeftSeconds` → receptoarele fac **snap** la valoare
+  (corectează drift-ul acumulat în fereastra de propagare a pauzei).
+- Pe pauză: `lastSeenTime` se scrie cu `pauseStartTime` (nu `millis()`), iar
+  paginile 4/5 afișează timpul scurs față de `pauseStartTime` → îngheață.
+  Heartbeat-ul se amână (nu se trimite pe pauză).
+
+---
+
+## Protocol LoRa
+
+Modul **DX-LR03-433T30D** (UART, 9600 baud spre modul), 27 dBm, ~435.8 MHz.
+Modulele **NU au LBT** (fără carrier sense). Antene: sleeve dipol (fără plan de masă).
+
+### Structura pachetului
+```
+[NET][TYPE][UNIT][...payload...][SES][CRC]
+```
+- `NET` = `NETWORK_ID` (marker fix de flux, 1 octet). Nu-l varia.
+- `UNIT` = `unitByte()` = `(bare_baterie<<4) | UNIT_ID`. **Bateria calatoreste in
+  fiecare alerta** aici; se citeste la RX cu `(rxBuf[2]>>4)&0x07`.
+- `SES` = `sessionId` (1 octet) — filtru de retea (vezi mai jos).
+- `CRC` = XOR pe 1 octet peste tot restul, prin `sealPacket()`.
+
+`sealPacket(buf, len)` scrie `SES` la `[len-2]` + CRC la `[len-1]`. Orice funcție
+de build trebuie s-o folosească (nu scrie CRC de mână). Offset-urile payload-ului
+NU se schimbă când adaugi/scoți câmpuri — `SES` și `CRC` stau mereu la coadă.
+
+### Sesiune (izolarea rețelei)
+- Maestrul generează `sessionId = random(1,256)` la primul sync (stabil apoi).
+- La RX, după CRC: pachetele cu altă sesiune sunt **ignorate**, cu excepția
+  SYNC (care poartă sesiunea de adoptat). SYNC acceptat → `sessionId = rxBuf[len-2]`.
+- SYNC primit e respins dacă jocul local rulează (`gameActive`) — protejează
+  împotriva unui sync accidental de pe o unitate proaspătă.
+
+### Fiabilitate (dublaj + sloturi)
+- Majoritatea evenimentelor se trimit **dublat** (`loraQueueSendDup`): o copie
+  imediat + a doua în slotul unității: `now + UNIT_ID*TX_SLOT_MS + random(0,TX_SLOT_RAND)`
+  (`TX_SLOT_MS=700`, `TX_SLOT_RAND=200`). Sloturile per-unitate nu se suprapun →
+  copiile de recuperare nu se ciocnesc între ele.
+- Trimise **simplu**: SYNC (blocant), TIME_SYNC (valoare proaspătă), HEARTBEAT-ping.
+- Heartbeat automat (keep-alive / time-sync) la interval random 20-30 min
+  (`HB_MIN_MS`/`HB_MAX_MS`). Orice transmisie reprogramează heartbeat-ul.
+- Evenimentele aditive au **dedup** la copia dublă: RESPAWN/KILLRESET prin
+  cumulativ/fereastră de timp; CARDPTS prin `seq` per-unitate.
+
+### Pachete (cod tip / lungime cu sesiune)
+`PKT_SYNC 0x01`(14) · `PKT_RESTART 0x02`(5) · `PKT_MODE 0x03`(7) ·
+`PKT_TIME_START..RESET 0x04-0x07`(5, RESUME 7) · `PKT_CAPTURE 0x08`(6) ·
+`PKT_NEUTRALIZE 0x09`(8) · `PKT_RESPAWN 0x0A`(8) · `PKT_BOMB_PLANT 0x0B`(6) ·
+`PKT_BOMB_DEFUSE 0x0C`(6) · `PKT_KILLRESET 0x0D`(8) · `PKT_HEARTBEAT 0x0E`(5) ·
+`PKT_TIME_SYNC 0x0F`(7) · `PKT_CARDPTS 0x10`(9).
+
+`rxBuf[16]` — pachetul maxim (SYNC=14) trebuie să încapă aici. La RX, `rxLen` se
+alege după `PKT_*`; nu hardcoda lungimi (folosește macro-urile `*_PKT_LEN`).
+
+---
+
+## Export / Import stare pe card RFID
+
+Alternativă la SYNC pentru a aduce o unitate la curent MID-game (transferă starea
+completă: setări, timer, scoruri, kills, `lastSeenTime`, baterii, `sessionId`).
+
+- **Versiune curentă:** `STATE_BLOB_VERSION 0x04`, `STATE_BLOB_LEN 297`.
+- Buffer `stateBlob[336]` — trebuie **>= `STATE_BLOB_LEN`** (overflow-ul a fost
+  un bug clasic; bump-uiește-l odată cu formatul).
+- `EXP_BLOCKS` (rfid.cpp) = 21 blocuri de date (sectoare 2-8) = 336 octeti capacitate.
+- Layout: magic, versiune, setări(14), timer, flags, conquestWinner, timerPhase,
+  tabel 12×19, penalizări(8), `lastSeen[12]` uint16, baterii[12] uint8, `sessionId`, CRC16.
+- **Bateria proprie NU se ia de pe card** (o măsoară unitatea singură) — importul
+  sare peste `UNIT_ID-1` la `globalBattery`.
+- **Schimbarea formatului → bump versiune → re-export toate cardurile.**
+  Cardurile vechi dau „Import FAILED" (respins curat).
+
+---
+
+## RFID / OLED / Baterie — capcane cunoscute
+
+- **RFID:** Elechouse PN532 V3 (SPI, `Adafruit_PN532`). IRQ/RSTO neconectate.
+  Admin tag = bloc 4, magic + type==2, cheie custom `{A1B2C3D4E5F6}`; celelalte
+  sectoare cu cheie factory `{FF×6}`. (Lotul vechi MFRC522 era defect — migrat.)
+- **OLED SSD1309** (I2C 0x3C, 128×64): necesită `SSD1306_EXTERNALVCC`. Fix drift
+  imagine: `Wire.setClock(100000)` după `begin()` + refresh registri periodic.
+- **Baterie:** `updateBattery()` pe GPIO36, divizor 10k/3.3k, la 10s, smoothing
+  80/20. `batteryPercent` (0-100) → bare 0-4 → `globalBattery[UNIT_ID-1]`
+  (setat ACUM în `updateBattery`, ca orice alertă să ducă valoarea curentă,
+  independent de afișaj).
+
+---
+
+## Workflow de livrare (IMPORTANT)
+
+1. Modificările se aplică chirurgical (blocuri exacte GĂSEȘTE / ÎNLOCUIEȘTE),
+   nu descrieri vagi de tip „în blocul de heartbeat".
+2. După orice modificare: verifică **echilibrul acoladelor** per fișier și
+   referințele încrucișate (grep) înainte de a declara gata.
+3. Iterativ, feature cu feature; se confirmă că merge înainte de a continua.
+4. **Schimbare de wire-format** (lungime pachet / câmp nou / sesiune) →
+   **clean build + reflash la TOATE unitățile simultan** + re-sync. O unitate pe
+   format vechi nu mai comunică cu cele noi.
+5. **Schimbare de blob-format** → re-export toate cardurile.
+6. Push pe GitHub după ce starea e confirmată funcțională.
+
+---
+
+## Reguli de aur (bug-uri deja plătite)
+
+- `lastTimerTick += 1000`, niciodată `= now`.
+- Verifică `sizeof` destinație la orice `memcpy` (un `memcpy` de 400B într-un
+  destinatar de 4B a corupt globale ore la rând).
+- `stateBlob` >= `STATE_BLOB_LEN` mereu; crește-le împreună.
+- Reconstrucția de timpi pe **unitate proaspătă** trebuie să tolereze underflow
+  `uint32` (`millis()` mic), iar gardienii de consum să fie wraparound-safe
+  (diferență cu semn, NU `(a>b)?a-b:0`).
+- Antene „433 MHz" din comerț aveau elementul greșit (~1500 MHz real) → rază
+  ~490 m. Sleeve dipol e corect pentru cutii de plastic.
+- Activează **CRC hardware pe modul, uniform pe toate unitățile** (altfel unele
+  așteaptă un câmp pe care altele nu-l trimit → nu comunică).
