@@ -140,12 +140,9 @@ void buildContext(PageContext& ctx, uint8_t currentPage, uint8_t batteryPercent,
     for (uint8_t t = 0; t < 4; t++) ctx.globalKills[0][t] = teamKillTotal(t);
 
     // Meta unitate locala
-    uint8_t localBars = 0;
-    if (batteryPercent >= 80)      localBars = 4;
-    else if (batteryPercent >= 60) localBars = 3;
-    else if (batteryPercent >= 40) localBars = 2;
-    else if (batteryPercent >= 20) localBars = 1;
-    globalBattery[UNIT_ID - 1] = localBars;
+    // globalBattery[UNIT_ID-1] NU se mai calculeaza aici: buildContext() ruleaza doar
+    // pe paginile de joc, iar nivelul trebuie sa fie corect si in pachetele trimise din
+    // meniu/admin (SYNC, MODE). Se face acum in updateBattery(), la fiecare masurare.
     // lastSeenTime[UNIT_ID-1] NU se mai seteaza aici: pe pag.5 arata acum timpul de la ultima TRANSMISIE
     // (paginile 4/5 trateaza unitatea locala separat prin i==UNIT_ID-1, deci ramane mereu vizibila/online)
 

@@ -97,7 +97,10 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
 - Fără adresare — totul e **broadcast**. Filtrare pe trei niveluri: `NETWORK_ID` (byte 0),
   `sessionId` (penultimul byte, adoptat la SYNC) și checksum XOR (ultimul byte).
 - Byte-ul 2 e `unitByte()`: bits[3:0] = UNIT_ID, bits[6:4] = nivel baterie (0-4) — bateria
-  călătorește gratis în orice pachet.
+  călătorește gratis în orice pachet. Nivelul se calculează în `updateBattery()` (la fiecare
+  10s din `loop()`, în orice stare) — **nu** în `buildContext()`, care rulează doar cât timp
+  se desenează paginile de joc: acolo, pachetele trimise din meniu/admin (SYNC, MODE) plecau
+  cu bateria 0 și unitatea apărea descărcată pe pagina 5 a celorlalți.
 - **Sync**: o unitate din admin trimite `PKT_SYNC` (blocant, cu pauză de ceas) — celelalte
   adoptă setările (indici pe biți), `localTime` și `sessionId`. Emițătorul devine
   `isTimeMaster` și trimite periodic `PKT_TIME_SYNC` ca să anuleze drift-ul între ESP-uri.
@@ -147,7 +150,8 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   2 scoruri, 3 kill-uri, 4 status unități, 5 ping/radar + baterii, 6 info joc + start/pauză.
   Verde are funcții contextuale: scroll pe 4/5, **reset scoruri pe 2**, reset kill-uri pe 3,
   reset ceas pe 6. Cele trei resetări cer cardul de admin (fereastră de 3s) și trimit alertă
-  în rețea. **Resetul de scoruri merge doar pe pauză** (altfel „Can't do that while playing")
+  în rețea. **Resetul de scoruri e blocat doar cât timp jocul chiar rulează** — merge nepornit,
+  pe pauză, la time out și la game over (altfel „Can't do that while playing")
   și atinge doar punctele — `savedPoints`, `liveCapture` și `appliedPenalties` (acestea din
   urmă ca pagina 2 să nu arate scoruri negative); sectoarele rămân cucerite, bombele armate,
   kill-urile neatinse.
