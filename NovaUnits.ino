@@ -108,6 +108,9 @@ uint16_t   killResetPoints     = 0;
 bool       killResetHasPoints  = false;
 uint32_t   killResetDoneStart  = 0;
 uint32_t   lastKillResetAt     = 0;   // dedup KILLRESET
+uint32_t   ptsResetAdminStart  = 0;   // fereastra de 3s 'prezinta cardul' (reset scoruri)
+uint32_t   ptsResetDoneStart   = 0;
+uint8_t    ptsResetSeq[MAX_UNITS] = {0};   // ultimul seq PTSRESET aplicat per unitate (filtru dublaj)
 bool       timeSyncFreezing    = false; // maestrul: ingheata countdown-ul cat trimite TIME_SYNC
 
 // --- Card puncte (bonus) ---
@@ -489,6 +492,25 @@ void applyKillsReset() {
     queueTail = 0;
     needsDisplayUpdate = true;
     Serial.println("[KILLS] Reset kill-uri si coada respawn!");
+}
+
+// ============================================================
+// applyPointsReset() — reset scoruri pe tot tabelul
+// Atinge DOAR punctele, nu si starea de joc: sectoarele raman cucerite,
+// bombele armate, kill-urile nemodificate.
+// ============================================================
+void applyPointsReset() {
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        for (uint8_t t = 0; t < 4; t++) unitTable[u].savedPoints[t] = 0;
+        // Estimarea cuceririi curente porneste si ea de la zero, ca la neutralizare
+        // corectia (savedPoints -= liveCapture; += exactPts) sa ramana valida.
+        liveCapture[u] = 0;
+    }
+    // Penalizarile se sterg odata cu punctele — altfel pagina 2 ar arata scoruri
+    // negative imediat dupa reset (afisajul scade appliedPenalties din total).
+    for (uint8_t t = 0; t < 4; t++) appliedPenalties[t] = 0;
+    needsDisplayUpdate = true;
+    Serial.println("[SCORE] Reset scoruri!");
 }
 
 // ============================================================
@@ -875,6 +897,13 @@ void loop() {
                     unitTable[cu].savedPoints[loraEvtTeam - 1] += loraEvtPoints;   // echipa X primeste +Y puncte
                 tone(PIN_BUZZER, 1200, 100);
                 needsDisplayUpdate = true;
+            }
+        } else if (ev == LORA_EVT_PTSRESET) {
+            uint8_t pu = loraEvtUnit - 1;
+            if (loraEvtSeq != ptsResetSeq[pu]) {   // filtru dublaj: copia a doua are acelasi seq
+                ptsResetSeq[pu] = loraEvtSeq;
+                applyPointsReset();
+                tone(PIN_BUZZER, 1500, 200);
             }
         } else if (ev == LORA_EVT_TIME_SYNC) {
             if (isGameTimerRunning && !isGamePaused && currentWinCondition != WIN_BY_CONQUEST) {
@@ -1327,6 +1356,46 @@ void loop() {
             break;
         }
 
+        case STATE_PTS_RESET_ADMIN: {
+            if (needsDisplayUpdate) {
+                drawPointsResetAdminScreen();
+                needsDisplayUpdate = false;
+            }
+            // Timeout 3 secunde fara card -> inapoi pe pagina 2 + ton de fail
+            if (millis() - ptsResetAdminStart >= 3000) {
+                currentState = STATE_PAGES;
+                currentPage = 1;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 200, 300);
+                break;
+            }
+            if (millis() - lastRfidRead >= 100) {
+                RfidReadData rfid = rfidReadTag();
+                lastRfidRead = millis();
+                if (rfid.result == RFID_READ_ADMIN) {
+                    applyPointsReset();
+                    loraSendPointsReset();          // anuntam reteaua
+                    currentPage = 1;
+                    ptsResetDoneStart = millis();
+                    currentState = STATE_PTS_RESET_DONE;
+                    needsDisplayUpdate = true;
+                    rfidIgnoreUntil = millis() + 2000;
+                    tone(PIN_BUZZER, 1500, 300);
+                } else if (rfid.result == RFID_READ_POINTS || rfid.result == RFID_READ_INVALID) {
+                    tone(PIN_BUZZER, 200, 300);     // card gresit
+                }
+            }
+            break;
+        }
+
+        case STATE_PTS_RESET_DONE:
+            if (needsDisplayUpdate) { drawPointsResetDoneScreen(); needsDisplayUpdate = false; }
+            if (millis() - ptsResetDoneStart >= 2000) {
+                currentState = STATE_PAGES;
+                needsDisplayUpdate = true;
+            }
+            break;
+
         case STATE_KILL_RESET_CONFIRM:
             if (needsDisplayUpdate) {
                 drawKillResetConfirmScreen();
@@ -1710,7 +1779,22 @@ void onShortPress(uint8_t btnIndex) {
             currentPage = (currentPage >= 5) ? 0 : currentPage + 1;
             needsDisplayUpdate = true;
         } else if (btnIndex == 2) {     // VERDE — scroll pe paginile 4 si 5
-            if (currentPage == 2 && !isTimeOut) {
+            if (currentPage == 1) {
+                // PAGE 2 — VERDE: reset scoruri. Permis DOAR pe pauza: atunci nicio
+                // unitate nu emite, deci alerta nu se ciocneste de alt trafic.
+                if (!isGamePaused) {
+                    blockReturnState = STATE_PAGES;
+                    blockMsgStart = millis();
+                    currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else {
+                    ptsResetAdminStart = millis();
+                    currentState = STATE_PTS_RESET_ADMIN;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1000, 100);
+                }
+            } else if (currentPage == 2 && !isTimeOut) {
                 // PAGE 3 — VERDE: reset kill-uri (blocat cat timp jocul ruleaza)
                 if (isGameTimerRunning && !isGamePaused) {
                     blockReturnState = STATE_PAGES;

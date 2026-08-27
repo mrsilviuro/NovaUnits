@@ -110,7 +110,10 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   ca benzile celor 12 unități să nu se suprapună. De aceea **fiecare handler de recepție are
   un filtru de dublaj** — verificare de stare (`status != SEC_CAPTURED`), fereastră de timp
   (≥12s pentru TIME/KILLRESET) sau contor `seq` (CARDPTS). Dacă adaugi un tip de pachet nou,
-  **trebuie să-i proiectezi și filtrul de dublaj**.
+  **trebuie să-i proiectezi și filtrul de dublaj**. Preferă un octet de **secvență**
+  (`PKT_CARDPTS`, `PKT_PTSRESET`) în locul unei ferestre de timp: fereastra trebuie să fie
+  mai lată decât slotul copiei a doua (~8.4s) și atunci respinge și două acțiuni legitime
+  apropiate — exact ce se întâmplă azi la `PKT_TIME_*` și `PKT_KILLRESET`.
 - **Pattern important — „aplică după ce a plecat pachetul"**: pentru acțiuni de timp și de
   sector, emițătorul pune alerta în coadă, armează un flag (`emitterApplyArmed`,
   `sectorApplyArmed`) și își aplică efectul local abia când `loraTxIdle()` devine true. Așa
@@ -142,7 +145,12 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
 
 - **6 pagini de joc** (Roșu = înapoi, Albastru = înainte): 1 gameplay (se adaptează după mod),
   2 scoruri, 3 kill-uri, 4 status unități, 5 ping/radar + baterii, 6 info joc + start/pauză.
-  Verde are funcții contextuale: scroll pe 4/5, reset kill-uri pe 3, reset ceas pe 6.
+  Verde are funcții contextuale: scroll pe 4/5, **reset scoruri pe 2**, reset kill-uri pe 3,
+  reset ceas pe 6. Cele trei resetări cer cardul de admin (fereastră de 3s) și trimit alertă
+  în rețea. **Resetul de scoruri merge doar pe pauză** (altfel „Can't do that while playing")
+  și atinge doar punctele — `savedPoints`, `liveCapture` și `appliedPenalties` (acestea din
+  urmă ca pagina 2 să nu arate scoruri negative); sectoarele rămân cucerite, bombele armate,
+  kill-urile neatinse.
 - **Admin** (card de admin sau combo Roșu+Albastru 3s): Game Settings, Bomb Parameters, Respawn
   Rules, Sync Units, TAG Writer, Imp./Exp. Data, Change Mode, System Restart, Power Off. Cele
   mai multe sunt **blocate cât timp jocul rulează** → `STATE_ADMIN_BLOCKED`.
