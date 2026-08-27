@@ -179,6 +179,18 @@ void updateBattery() {
 
     if (batteryPercent == 100) batteryPercent = newPercent;
     else batteryPercent = (batteryPercent * 80 + newPercent * 20) / 100;
+
+    // Nivelul in "bare" (0-4) calatoreste in orice pachet LoRa prin unitByte().
+    // Se calculeaza AICI, nu in buildContext(): acela ruleaza doar cat timp desenam
+    // paginile de joc, asa ca o unitate care trimitea SYNC sau MODE din meniu (deci
+    // inainte sa fi ajuns vreodata pe pagini) raporta bateria 0 si aparea descarcata
+    // pe pagina 5 a celorlalti pana la prima actiune din joc.
+    uint8_t bars = 0;
+    if (batteryPercent >= 80)      bars = 4;
+    else if (batteryPercent >= 60) bars = 3;
+    else if (batteryPercent >= 40) bars = 2;
+    else if (batteryPercent >= 20) bars = 1;
+    globalBattery[UNIT_ID - 1] = bars;
 }
 
 // ============================================================
@@ -1780,9 +1792,10 @@ void onShortPress(uint8_t btnIndex) {
             needsDisplayUpdate = true;
         } else if (btnIndex == 2) {     // VERDE — scroll pe paginile 4 si 5
             if (currentPage == 1) {
-                // PAGE 2 — VERDE: reset scoruri. Permis DOAR pe pauza: atunci nicio
-                // unitate nu emite, deci alerta nu se ciocneste de alt trafic.
-                if (!isGamePaused) {
+                // PAGE 2 — VERDE: reset scoruri. Permis cand jocul NU ruleaza:
+                // nepornit, pe pauza, time out sau game over. Doar in joc e blocat —
+                // atunci unitatile emit si alerta s-ar putea ciocni de alt trafic.
+                if (gameplayRunning()) {
                     blockReturnState = STATE_PAGES;
                     blockMsgStart = millis();
                     currentState = STATE_ADMIN_BLOCKED;
