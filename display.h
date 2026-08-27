@@ -147,6 +147,10 @@ void drawKillResetConfirmScreen();
 void drawKillResetWinnerScreen();
 void drawKillResetDoneScreen(uint16_t points, uint8_t teamIndex, bool hasPoints);
 
+// Ecrane Points Reset (pagina 2, buton VERDE)
+void drawPointsResetAdminScreen();
+void drawPointsResetDoneScreen();
+
 void drawBonusScreen(uint16_t points, uint8_t teamIndex);
 
 // Ecrane Sync (LoRa)
