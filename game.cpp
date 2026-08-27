@@ -229,7 +229,10 @@ void drawSyncedScreen(uint8_t fromUnitId) {
     display.print(l1);
     display.setTextSize(1);
     char buf[25];
-    snprintf(buf, sizeof(buf), "by unit %s", UNIT_NAMES[fromUnitId - 1]);
+    if (fromUnitId >= 1 && fromUnitId <= MAX_UNITS)
+        snprintf(buf, sizeof(buf), "by unit %s", UNIT_NAMES[fromUnitId - 1]);
+    else
+        strcpy(buf, "by unknown unit");
     x = (SCREEN_WIDTH - (strlen(buf) * 6)) / 2;
     display.setCursor(x, 44);
     display.print(buf);

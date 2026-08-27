@@ -262,7 +262,7 @@ void loraTick() {
 static void buildSyncPacket(uint8_t* buf) {
     buf[0] = (uint8_t)NETWORK_ID;
     buf[1] = PKT_SYNC;
-    buf[2] = UNIT_ID;
+    buf[2] = unitByte();   // era UNIT_ID brut: singurul pachet care nu purta nivelul bateriei
     buf[3] = (localTime >> 16) & 0xFF;
     buf[4] = (localTime >> 8) & 0xFF;
     buf[5] =  localTime        & 0xFF;
@@ -492,35 +492,35 @@ LoraEvent loraPoll() {
 
     // aruncam bytes pana la markerul NETWORK_ID
     while (LoRaSerial.available() && rxCount == 0 &&
-        (uint8_t)LoRaSerial.peek() != (uint8_t)NETWORK_ID)
+           (uint8_t)LoRaSerial.peek() != (uint8_t)NETWORK_ID)
         LoRaSerial.read();
 
     while (LoRaSerial.available() && rxCount < sizeof(rxBuf) &&
-        (rxLen == 0 || rxCount < rxLen)) {
+           (rxLen == 0 || rxCount < rxLen)) {
         rxBuf[rxCount++] = LoRaSerial.read();
-    if (rxCount == 1) rxStart = now;
-    if (rxCount == 2) {            // tipul e cunoscut -> stim lungimea
-        if      (rxBuf[1] == PKT_SYNC)    rxLen = SYNC_PKT_LEN;
-        else if (rxBuf[1] == PKT_RESTART) rxLen = RESTART_PKT_LEN;
-        else if (rxBuf[1] == PKT_MODE)    rxLen = MODE_PKT_LEN;
-        else if (rxBuf[1] == PKT_TIME_RESUME) rxLen = TIME_RESUME_PKT_LEN;
-        else if (rxBuf[1] >= PKT_TIME_START && rxBuf[1] <= PKT_TIME_RESET) rxLen = TIME_PKT_LEN;
-        else if (rxBuf[1] == PKT_CAPTURE)    rxLen = CAPTURE_PKT_LEN;
-        else if (rxBuf[1] == PKT_NEUTRALIZE) rxLen = NEUT_PKT_LEN;
-        else if (rxBuf[1] == PKT_CARDPTS)    rxLen = CARDPTS_PKT_LEN;
-        else if (rxBuf[1] == PKT_RESPAWN)    rxLen = RESPAWN_PKT_LEN;
-        else if (rxBuf[1] == PKT_BOMB_PLANT || rxBuf[1] == PKT_BOMB_DEFUSE) rxLen = BOMB_PKT_LEN;
-        else if (rxBuf[1] == PKT_KILLRESET) rxLen = KILLRESET_PKT_LEN;
-        else if (rxBuf[1] == PKT_HEARTBEAT) rxLen = HEARTBEAT_PKT_LEN;
-        else if (rxBuf[1] == PKT_TIME_SYNC) rxLen = TIME_SYNC_PKT_LEN;
-        else { rxCount = 0; rxLen = 0; break; }   // tip necunoscut -> resync
-    }
+        if (rxCount == 1) rxStart = now;
+        if (rxCount == 2) {            // tipul e cunoscut -> stim lungimea
+            if      (rxBuf[1] == PKT_SYNC)    rxLen = SYNC_PKT_LEN;
+            else if (rxBuf[1] == PKT_RESTART) rxLen = RESTART_PKT_LEN;
+            else if (rxBuf[1] == PKT_MODE)    rxLen = MODE_PKT_LEN;
+            else if (rxBuf[1] == PKT_TIME_RESUME) rxLen = TIME_RESUME_PKT_LEN;
+            else if (rxBuf[1] >= PKT_TIME_START && rxBuf[1] <= PKT_TIME_RESET) rxLen = TIME_PKT_LEN;
+            else if (rxBuf[1] == PKT_CAPTURE)    rxLen = CAPTURE_PKT_LEN;
+            else if (rxBuf[1] == PKT_NEUTRALIZE) rxLen = NEUT_PKT_LEN;
+            else if (rxBuf[1] == PKT_CARDPTS)    rxLen = CARDPTS_PKT_LEN;
+            else if (rxBuf[1] == PKT_RESPAWN)    rxLen = RESPAWN_PKT_LEN;
+            else if (rxBuf[1] == PKT_BOMB_PLANT || rxBuf[1] == PKT_BOMB_DEFUSE) rxLen = BOMB_PKT_LEN;
+            else if (rxBuf[1] == PKT_KILLRESET) rxLen = KILLRESET_PKT_LEN;
+            else if (rxBuf[1] == PKT_HEARTBEAT) rxLen = HEARTBEAT_PKT_LEN;
+            else if (rxBuf[1] == PKT_TIME_SYNC) rxLen = TIME_SYNC_PKT_LEN;
+            else { rxCount = 0; rxLen = 0; break; }   // tip necunoscut -> resync
         }
+    }
 
-        if (rxCount > 0 && (rxLen == 0 || rxCount < rxLen) && now - rxStart > 500) { rxCount = 0; rxLen = 0; return LORA_EVT_NONE; }
-        if (rxLen == 0 || rxCount < rxLen) return LORA_EVT_NONE;
+    if (rxCount > 0 && (rxLen == 0 || rxCount < rxLen) && now - rxStart > 500) { rxCount = 0; rxLen = 0; return LORA_EVT_NONE; }
+    if (rxLen == 0 || rxCount < rxLen) return LORA_EVT_NONE;
 
-        uint8_t type = rxBuf[1];
+    uint8_t type = rxBuf[1];
     uint8_t len  = rxLen;
     rxCount = 0; rxLen = 0;            // pachet complet — il consumam
 
@@ -689,7 +689,8 @@ LoraEvent loraPoll() {
     // cand suntem pe pauza, cu jocul neinceput sau terminat (time out).
     if (isGameTimerRunning && !isGamePaused && !isTimeOut) return LORA_EVT_NONE;
     sessionId = rxBuf[len - 2];          // adoptam sesiunea maestrului
-    uint8_t  fromUnit = rxBuf[2];
+    uint8_t  fromUnit = rxBuf[2] & 0x0F;
+    uint8_t  fromBatt = (rxBuf[2] >> 4) & 0x07;
     uint32_t lt = ((uint32_t)rxBuf[3] << 16) | ((uint32_t)rxBuf[4] << 8) | rxBuf[5];
 
     uint16_t bit = 0;
@@ -714,9 +715,12 @@ LoraEvent loraPoll() {
     localTimePaused = false;
     isSynced        = true;
     isTimeMaster    = false;                // am primit sync -> nu sunt autoritatea de timp
-    syncedByUnit    = fromUnit;
-    if (fromUnit >= 1 && fromUnit <= MAX_UNITS) lastSeenTime[fromUnit - 1] = now;
-    Serial.print("[LORA] SYNC primit de la unit ");
+    if (fromUnit >= 1 && fromUnit <= MAX_UNITS) {
+        syncedByUnit                = fromUnit;   // doar un ID valid ajunge pe ecranul "SYNCED by ..."
+        lastSeenTime[fromUnit - 1]  = now;
+        globalBattery[fromUnit - 1] = fromBatt;
+    }
+    Serial.print("[LORA] SYNC primit de la unit "); Serial.print(fromUnit);
     Serial.print(", localTime="); Serial.println(lt);
     return LORA_EVT_SYNC;
 }

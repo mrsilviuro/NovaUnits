@@ -86,8 +86,11 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
   { 0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6 }
 #define RFID_MAGIC_BYTE 0x4E
 #define RFID_BLOCK_ADDR 4
-#define STATE_BLOB_VERSION 0x04   // versiune format export/import card
-#define STATE_BLOB_LEN     297     // lungimea blob-ului serializat
+#define STATE_BLOB_VERSION 0x05   // versiune format export/import card
+// Lungimea blob-ului serializat. Defalcare (vezi buildExportBlob):
+//   2 antet + 14 setari + 6 flux joc + 12*31 randuri + 16 penalizari
+//   + 24 lastSeen + 12 baterii + 1 sesiune + 2 CRC = 449
+#define STATE_BLOB_LEN     449
 
 // ============================================================
 // ECHIPE & UNITATI
