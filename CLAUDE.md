@@ -30,6 +30,26 @@ o menține sincronizată prin alerte broadcast.
 | `rfid.cpp/.h` | PN532 pe SPI, carduri MIFARE Classic: citire/scriere card de puncte și card de admin, „arderea" cardului după folosire, export/import blob de stare pe sectoarele 2..7. |
 | `lora.cpp/.h` | Transport: modul DX-LR03 pe UART1 (9600), coadă TX non-blocantă cu handshake pe pinul AUX, format de pachete, `loraPoll()` care decodează și aplică ce vine. |
 
+## Reguli de operare pe teren (NU sunt bug-uri — sunt procedura)
+
+Codul depinde de ordinea asta; mai multe „ciudatenii" din el se explica doar prin ea.
+
+1. **Intai SYNC, apoi alegerea modurilor.** `PKT_MODE` e ignorat de o unitate
+   nesincronizata (`if (!isSynced) return;` in `loraPoll`), deci un mod ales inainte de
+   sync nu ajunge nicaieri. Daca s-a intamplat: **Admin Mode → Change Mode** si se alege
+   modul din nou, iar unitatea il retransmite.
+2. **SYNC transmite doar setarile + `localTime` + `sessionId`** — deliberat. Tabelul cu
+   scoruri/moduri **nu** circula prin radio: la SF10 ar tine aerul ocupat prea mult.
+   O unitate repornita in mijlocul jocului isi ia setarile prin sync si restul starii
+   prin **Export/Import pe card de admin**.
+3. **Jocul nu incepe pana cand staff-ul nu confirma ca toate unitatile sunt pornite si
+   sincronizate.**
+4. **RESET de ceas se da din pauza**, intentionat: pe pauza nicio unitate nu emite, deci
+   alerta de reset nu se ciocneste de alt trafic (modulele nu au listen-before-talk si nu
+   pot emite si asculta simultan). Foloseste la meciuri rapide/SQB: runda noua cu ceas
+   resetat, dar cu scorurile pastrate. **Resetul atinge doar ceasul, nu si starea de joc** —
+   sectoarele raman cucerite si continua sa produca puncte.
+
 ## Modelul de joc
 
 `unitTable[MAX_UNITS]` — **fiecare unitate ține tabelul întreg**, nu doar rândul propriu.
@@ -109,6 +129,9 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   se reconstruiesc pe unitatea nouă.
   ⚠️ Dacă schimbi layout-ul blob-ului, **incrementează `STATE_BLOB_VERSION` și recalculează
   `STATE_BLOB_LEN`** (altfel `applyImportBlob` respinge cardul, ceea ce e comportamentul dorit).
+  `buildExportBlob()` avertizează pe serial dacă lungimea scrisă nu e egală cu constanta.
+  Blob-ul ocupă blocurile de date din sectoarele 2..11; `EXP_BLOCKS` are rezervă până la
+  sectorul 15 (672 B), deci mai poate crește fără schimbări în `rfid.cpp`.
 
 ## UI
 
@@ -135,16 +158,18 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   sunt mașini de stări cu `millis()`.
 - Comparațiile de timp folosesc diferențe cast-uite la `int32_t` acolo unde valorile pot fi
   „subcurse" după import — păstrează pattern-ul, nu-l simplifica la `a > b`.
-- ⚠️ **Indentarea minte în mai multe locuri** (blocuri `if` fără acolade cu linii aliniate
-  greșit dedesubt). Citește logica, nu indentarea, când modifici `loop()`.
+- **Pauza nu oprește `millis()`.** Pe durata ei calculele sunt doar ignorate; la ieșirea din
+  pauză `unfreezeAfterPause()` împinge înainte cu durata pauzei toate reperele absolute
+  (`actionTime`, `lastPointTick[]`, `respawnQueue[]`, `lastSeenTime[]`, `lastTimerTick`).
+  **Orice traseu nou care stinge `isGamePaused` trebuie să apeleze întâi funcția asta** —
+  altfel sectoarele recuperează zeci de tick-uri deodată și bombele explodează instantaneu.
 
 ## Lucruri de știut înainte să modifici
 
-- `FW_VERSION` = `"NU-diag-1"` — se bumpează la fiecare build ca să verifici că toate unitățile
-  au același cod. Există și un **dump de diagnostic pe serial la 60s** în `loop()` (blocul
-  „DIAG SCOR"), marcat ca temporar.
-- Limite de serializare: `savedPoints` se trunchiază la `int16_t` și `kills` la 255 în blob-ul
-  de card — scoruri peste 32767 nu supraviețuiesc unui export.
+- `FW_VERSION` se bumpează la fiecare build și se afișează pe serial la boot. **Toate cele 12
+  unități trebuie să ruleze aceeași versiune** — formatul pachetelor LoRa și al blob-ului de
+  card diferă între versiuni, iar o unitate rămasă în urmă fie respinge cardul, fie
+  interpretează greșit pachetele.
 - WiFi și Bluetooth sunt oprite explicit în `setup()` (consum + stabilitate radio).
 - Power latch pe GPIO17: unitatea își ține singură alimentarea; „Power Off" pulsează pinul LOW.
 - Releul e `OUTPUT_OPEN_DRAIN`, **activ pe LOW**.

@@ -116,13 +116,20 @@ bool rfidBurnTag() {
 }
 
 // ============================================================
-// EXPORT/IMPORT stare joc — sectoarele 2..7 (blocuri de date, sarim trailerele).
-// Sectorul 1 (bloc 4) ramane identitatea de admin, neatins.
+// EXPORT/IMPORT stare joc — sectoarele 2..15 (blocuri de date, sarim trailerele).
+// Sectorul 1 (bloc 4) ramane identitatea de admin, neatins. Sectorul 0 e al
+// producatorului, nu il atingem.
+// Lista acopera tot cardul de 1K, dar buclele se opresc la 'off < len', deci
+// pentru STATE_BLOB_LEN=449 se scriu/citesc efectiv doar 29 de blocuri
+// (sectoarele 2..11). Restul sunt rezerva daca blob-ul mai creste.
 // ============================================================
 static const uint8_t EXP_BLOCKS[] = {
-    8, 9, 10,  12, 13, 14,  16, 17, 18,  20, 21, 22,  24, 25, 26,  28, 29, 30,  32, 33, 34
+     8,  9, 10,   12, 13, 14,   16, 17, 18,   20, 21, 22,
+    24, 25, 26,   28, 29, 30,   32, 33, 34,   36, 37, 38,
+    40, 41, 42,   44, 45, 46,   48, 49, 50,   52, 53, 54,
+    56, 57, 58,   60, 61, 62
 };
-static const uint8_t EXP_BLOCK_COUNT = sizeof(EXP_BLOCKS);   // 21 blocuri = 336 octeti
+static const uint8_t EXP_BLOCK_COUNT = sizeof(EXP_BLOCKS);   // 42 blocuri = 672 octeti
 
 RfidExportResult rfidExportState(const uint8_t* blob, uint16_t len) {
     uint8_t uid[7] = {0};

@@ -471,7 +471,10 @@ void drawPages(const PageContext& ctx) {
                         display.setCursor(x, 51);
                         display.print(ct);
                     } else {
-                        uint32_t totalMin = el / 60000;
+                        // +5s: aceeasi corectie de jumatate de tick ca in bucla de punctaj
+                        // din loop(); fara ea afisajul ramanea cu o treapta in urma fata de
+                        // bonusul chiar acordat.
+                        uint32_t totalMin = (el + 5000) / 60000;
                         uint32_t bonus = (ctx.bonusIntervalMinutes > 0) ? (totalMin / ctx.bonusIntervalMinutes) : 0;
                         if (bonus > 3) bonus = 3;  // limita maxima
                         char ptsStr[10];
@@ -571,7 +574,15 @@ void drawPages(const PageContext& ctx) {
             // --- RESPAWN UNIT ---
             else if (ctx.selectedMode == 2) {
                 // Liniile 1-2
-                bool limitReached = (ctx.teamMaxRespawns[ctx.respawnTeam - 1] > 0 && ctx.teamKills[ctx.respawnTeam - 1] >= ctx.teamMaxRespawns[ctx.respawnTeam - 1]);
+                // Fara echipa (respawnTeam == TEAM_NEUTRAL) indicii ar fi -1 -> citire
+                // in afara array-ului. Afisam un placeholder si nicio limita.
+                bool limitReached = false;
+                const char* rTeamName = "NO TEAM";
+                if (ctx.respawnTeam != TEAM_NEUTRAL) {
+                    uint8_t rti = (uint8_t)ctx.respawnTeam - 1;
+                    rTeamName = TEAM_NAMES[rti];
+                    limitReached = (ctx.teamMaxRespawns[rti] > 0 && ctx.teamKills[rti] >= ctx.teamMaxRespawns[rti]);
+                }
                 if (ctx.isGamePaused) {
                     display.setTextSize(2);
                     const char* pmsg = "PAUSED";
@@ -590,19 +601,13 @@ void drawPages(const PageContext& ctx) {
                         display.setCursor(x, 18);
                         display.print(timeBuf);
                         display.setTextSize(1);
-                    } else if (limitReached) {
-                        display.setTextSize(2);
-                        const char* tn = TEAM_NAMES[ctx.respawnTeam - 1];
-                        uint8_t x = (SCREEN_WIDTH - (strlen(tn) * 12)) / 2;
-                        display.setCursor(x, 18);
-                        display.print(tn);
-                        display.setTextSize(1);
                     } else {
+                        // fara coada: aratam numele echipei (identic cu/fara limita atinsa,
+                        // diferenta o face doar textul de pe liniile 3-4)
                         display.setTextSize(2);
-                        const char* tn = TEAM_NAMES[ctx.respawnTeam - 1];
-                        uint8_t x = (SCREEN_WIDTH - (strlen(tn) * 12)) / 2;
+                        uint8_t x = (SCREEN_WIDTH - (strlen(rTeamName) * 12)) / 2;
                         display.setCursor(x, 18);
-                        display.print(tn);
+                        display.print(rTeamName);
                         display.setTextSize(1);
                     }
                 }
@@ -816,32 +821,32 @@ void drawPages(const PageContext& ctx) {
                         rows[i] = rows[j];
                         rows[j] = tmp;
                     }
-                    uint8_t maxScroll = (count > 4) ? (count - 4) : 0;
-                uint8_t scroll = (maxScroll == 0) ? 0 : (ctx.page4ScrollIndex % (maxScroll + 1));
-                if (count == 0) {
-                    display.setCursor(10, 30);
-                    display.print("No active units ...");
-                } else {
-                    uint8_t rightMargin = (count > 4) ? 3 : 0;
-                    uint8_t shown = 0;
-                    for (uint8_t i = scroll; i < count && shown < 4; i++) {
-                        uint8_t y = 15 + (shown * 14);
-                        display.setCursor(0, y);
-                        if (rows[i].id == UNIT_ID - 1) {
-                            display.drawBitmap(0, y, ARROW_RIGHT, 5, 7, SSD1306_WHITE);
-                            display.setCursor(12, y);
-                        } else {
-                            display.print("- ");
-                        }
-                        display.print(UNIT_NAMES[rows[i].id]);
-                        uint8_t tw = strlen(rows[i].status) * 6;
-                        display.setCursor(SCREEN_WIDTH - tw - rightMargin, y);
-                        display.print(rows[i].status);
-                        shown++;
+            uint8_t maxScroll = (count > 4) ? (count - 4) : 0;
+            uint8_t scroll = (maxScroll == 0) ? 0 : (ctx.page4ScrollIndex % (maxScroll + 1));
+            if (count == 0) {
+                display.setCursor(10, 30);
+                display.print("No active units ...");
+            } else {
+                uint8_t rightMargin = (count > 4) ? 3 : 0;
+                uint8_t shown = 0;
+                for (uint8_t i = scroll; i < count && shown < 4; i++) {
+                    uint8_t y = 15 + (shown * 14);
+                    display.setCursor(0, y);
+                    if (rows[i].id == UNIT_ID - 1) {
+                        display.drawBitmap(0, y, ARROW_RIGHT, 5, 7, SSD1306_WHITE);
+                        display.setCursor(12, y);
+                    } else {
+                        display.print("- ");
                     }
-                    drawScrollbar(count, 4, scroll, 13, 51);
+                    display.print(UNIT_NAMES[rows[i].id]);
+                    uint8_t tw = strlen(rows[i].status) * 6;
+                    display.setCursor(SCREEN_WIDTH - tw - rightMargin, y);
+                    display.print(rows[i].status);
+                    shown++;
                 }
-                break;
+                drawScrollbar(count, 4, scroll, 13, 51);
+            }
+            break;
         }
         // ====================================================
         // PAGINA 5 — PING RADAR
@@ -944,8 +949,8 @@ void drawPages(const PageContext& ctx) {
                     hint = "YELLOW to resume";
                 else if (!ctx.isGameTimerRunning)
                     hint = "";  // neinceput -> line4 arata "YELLOW to START"
-                    else
-                        hint = "YELLOW to pause";
+                else
+                    hint = "YELLOW to pause";
             }
 
             // Afisam line1 si line2 (mereu vizibile)
