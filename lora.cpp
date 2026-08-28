@@ -74,14 +74,32 @@ enum TxState { TX_IDLE, TX_START, TX_SENDING, TX_WAIT_DONE };
 static TxState  txState = TX_IDLE;
 static uint32_t txTimer = 0;
 
-// Heartbeat: keep-alive usor (doar nivelul bateriei, deja in unitByte) trimis la
-// 20-30 min de la ultima transmisie. ORICE alta alerta reseteaza timerul.
+// Heartbeat: keep-alive usor, la un moment aleator din fereastra 10-30 min.
+// Fereastra e aleatoare ca cele 12 unitati sa nu ajunga sa emita in acelasi timp.
+//
+// DOUA REGIMURI, pentru ca cele doua incarcaturi se comporta diferit:
+//   - unitate obisnuita: ORICE transmisie amana heartbeat-ul. Corect — nivelul
+//     bateriei calatoreste in byte 2 al oricarui pachet (unitByte()), deci o alerta
+//     de cucerire a dus deja bateria mai departe si heartbeat-ul nu mai e necesar.
+//   - MAESTRU de timp: timer propriu, resetat DOAR de propria emisie periodica.
+//     Corectia de ceas (PKT_TIME_SYNC) nu circula in alte pachete, deci traficul
+//     celorlalti nu e un motiv sa o amani: pe regula veche, intr-un joc activ
+//     corectia era impinsa la nesfarsit si nu pleca niciodata.
 static uint32_t nextHeartbeat = 0;   // 0 = neinitializat
-#define HB_MIN_MS  (20UL * 60000UL)
+#define HB_MIN_MS  (10UL * 60000UL)
 #define HB_MAX_MS  (30UL * 60000UL)
-static void heartbeatReschedule() {
+
+// Programeaza urmatoarea scadenta (folosita de ambele regimuri)
+static void heartbeatSchedule() {
     nextHeartbeat = millis() + HB_MIN_MS + (uint32_t)random(0, (long)(HB_MAX_MS - HB_MIN_MS) + 1);
     if (nextHeartbeat == 0) nextHeartbeat = 1;   // 0 e rezervat pentru "neinitializat"
+}
+
+// Apelata dupa orice transmisie. Pe maestru NU amana nimic: scadenta lui se misca
+// doar cand chiar trimite heartbeat-ul/corectia (vezi loraHeartbeatDue).
+static void heartbeatReschedule() {
+    if (isTimeMaster) return;
+    heartbeatSchedule();
 }
 
 static void loraQueueSend(const uint8_t* buf, uint8_t len) {
@@ -172,8 +190,13 @@ void loraTxUpdate() {
 // Heartbeat / TIME_SYNC — apelate din loop()
 bool loraHeartbeatDue() {
     if (!isSynced) return false;
-    if (nextHeartbeat == 0) { heartbeatReschedule(); return false; }   // init la prima sincronizare
-    return (int32_t)(millis() - nextHeartbeat) >= 0;
+    if (nextHeartbeat == 0) { heartbeatSchedule(); return false; }   // init la prima sincronizare
+    if ((int32_t)(millis() - nextHeartbeat) < 0) return false;
+    // Scadenta e consumata aici, deci urmatoarea fereastra porneste de la emisia
+    // asta — indiferent daca apelantul trimite TIME_SYNC sau un heartbeat simplu.
+    // Pe maestru asta e singurul loc care ii muta scadenta.
+    heartbeatSchedule();
+    return true;
 }
 
 // Sigileaza pachetul: octet de sesiune la [len-2], apoi CRC (XOR) la [len-1] peste tot restul.

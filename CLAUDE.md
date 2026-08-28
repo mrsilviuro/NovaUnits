@@ -121,7 +121,17 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   sector, emițătorul pune alerta în coadă, armează un flag (`emitterApplyArmed`,
   `sectorApplyArmed`) și își aplică efectul local abia când `loraTxIdle()` devine true. Așa
   emițătorul și receptoarele văd schimbarea aproximativ simultan.
-- **Heartbeat**: la 20-30 min de la ultima transmisie (orice transmisie resetează timerul).
+- **Heartbeat**: fereastră aleatoare de **10-30 min**, cu două regimuri, pentru că cele două
+  încărcături se comportă diferit. Pe o unitate obișnuită **orice transmisie amână
+  heartbeat-ul** — corect, fiindcă nivelul bateriei călătorește în byte 2 al oricărui pachet,
+  deci o alertă de cucerire l-a dus deja mai departe. Pe **maestrul de timp** scadența se mută
+  **doar** când chiar trimite el (`heartbeatReschedule()` iese devreme dacă `isTimeMaster`):
+  corecția de ceas (`PKT_TIME_SYNC`) nu circulă în alte pachete, deci traficul celorlalți nu e
+  un motiv s-o amâni. Pe regula veche, într-un joc activ corecția era împinsă la nesfârșit și
+  nu pleca niciodată. `loraHeartbeatDue()` consumă scadența când întoarce true, deci în `loop()`
+  verificarea de pauză trebuie să rămână **înaintea** ei.
+- **Ceasul se realiniază și la RESUME**: `PKT_TIME_RESUME` poartă secundele rămase, iar
+  receptorul face snap înainte să aplice. Deci orice pauză→resume resincronizează rețeaua.
 
 ## Carduri RFID (MIFARE Classic)
 
