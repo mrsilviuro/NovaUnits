@@ -116,6 +116,8 @@ uint32_t   fieldResetDoneStart  = 0;
 uint8_t    fieldResetSeq[MAX_UNITS] = {0};   // ultimul seq FIELDRESET aplicat per unitate
 uint32_t   gameResetDoneStart  = 0;          // ecranul de 2s "GAME RESET"
 uint8_t    gameResetSeq[MAX_UNITS] = {0};    // ultimul seq GAMERESET aplicat per unitate
+GameState  gameResetReturnState = STATE_PAGES;   // unde revenim dupa ecranul de 2s
+uint8_t    confirmAction       = 0;          // 0=Game Reset, 1=System Restart
 bool       timeSyncFreezing    = false; // maestrul: ingheata countdown-ul cat trimite TIME_SYNC
 
 // --- Card puncte (bonus) ---
@@ -1018,7 +1020,8 @@ void loop() {
                 digitalWrite(PIN_RELAY, LOW);
                 isRelayActive    = true;
                 relayTurnOffTime = now + 2000;
-                gameResetDoneStart = now;
+                gameResetDoneStart   = now;
+                gameResetReturnState = STATE_PAGES;   // receptorul revine in joc
                 currentState = STATE_GAME_RESET_DONE;
                 needsDisplayUpdate = true;
                 tone(PIN_BUZZER, 1500, 300);
@@ -1520,9 +1523,17 @@ void loop() {
             if (needsDisplayUpdate) { drawGameResetScreen(); needsDisplayUpdate = false; }
             if (millis() - gameResetDoneStart >= 2000) {
                 currentPage  = 0;
-                currentState = (selectedMode == -1) ? STATE_MENU : STATE_PAGES;
+                // Emitatorul se intoarce in Admin Mode (de acolo a dat comanda);
+                // receptoarele revin in joc. Fara rol, invariantul din loop() le duce
+                // oricum la selectia de mod.
+                currentState = gameResetReturnState;
                 needsDisplayUpdate = true;
             }
+            break;
+
+        case STATE_CONFIRM_ACTION:
+            if (needsDisplayUpdate) { drawConfirmActionScreen(confirmAction); needsDisplayUpdate = false; }
+            handleButtons();
             break;
 
         case STATE_FIELD_RESET_DONE:
@@ -2115,6 +2126,28 @@ void onShortPress(uint8_t btnIndex) {
         }
     }
 
+    else if (currentState == STATE_CONFIRM_ACTION) {
+        if (btnIndex == 0) {            // RED — nu, inapoi in meniul admin
+            currentState = STATE_ADMIN_MENU;
+            needsDisplayUpdate = true;
+        } else if (btnIndex == 1) {     // BLUE — da, executam
+            if (confirmAction == 0) {
+                applyGameReset();
+                loraSendGameReset();               // anuntam reteaua
+                gameResetDoneStart   = millis();
+                gameResetReturnState = STATE_ADMIN_MENU;   // cine a dat comanda ramane in admin
+                currentState = STATE_GAME_RESET_DONE;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 1500, 300);
+                // Releul NU se pulseaza aici: sirena e pentru teren, iar cel care a
+                // dat comanda stie deja. Suna doar pe unitatile care primesc alerta.
+            } else {
+                loraSendRestart();
+                doReboot();
+            }
+        }
+    }
+
     else if (currentState == STATE_SYNC_WARNING) {
         if (btnIndex == 0) {            // RED — inapoi in meniul admin
             currentState = STATE_ADMIN_MENU;
@@ -2244,19 +2277,17 @@ void onShortPress(uint8_t btnIndex) {
                     needsDisplayUpdate = true;
                     tone(PIN_BUZZER, 300, 200);
                 } else {
-                    applyGameReset();
-                    loraSendGameReset();          // anuntam reteaua
-                    gameResetDoneStart = millis();
-                    currentState = STATE_GAME_RESET_DONE;
+                    confirmAction = 0;            // cerem confirmare inainte sa stergem tot
+                    currentState = STATE_CONFIRM_ACTION;
                     needsDisplayUpdate = true;
-                    tone(PIN_BUZZER, 1500, 300);
-                    // Releul NU se pulseaza aici: sirena e pentru teren, iar cel care a
-                    // dat comanda stie deja. Suna doar pe unitatile care primesc alerta.
+                    tone(PIN_BUZZER, 1000, 50);
                 }
             } else if (adminMenuIndex == 8) {
-                // SYSTEM RESTART — anuntam reteaua, apoi reboot
-                loraSendRestart();
-                doReboot();
+                // SYSTEM RESTART — reboot pe toata reteaua, deci cerem confirmare
+                confirmAction = 1;
+                currentState = STATE_CONFIRM_ACTION;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 1000, 50);
             } else if (adminMenuIndex == 9) {
                 // POWER OFF
                 currentState = STATE_POWER_OFF;
