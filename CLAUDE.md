@@ -161,8 +161,7 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   unitate, deci de aici nu se poate ști dacă altcineva mai are jucători în așteptare.
 - **Change Mode** distinge două motive de refuz: jocul rulează → „Can't do that while
   playing"; unitatea e liberă de joc dar încă în rol (sector cucerit / bombă plantată /
-  coadă nevidă) → ecranul `UNIT BUSY`, care spune exact ce o ține ocupată și trimite la
-  eliberarea de pe pagina 1.
+  coadă nevidă) → ecranul `UNIT BUSY`, care spune exact ce o ține ocupată.
   **Eliberarea unităților** (`PKT_FIELDRESET`) pregătește terenul pentru o rundă nouă:
   sectoarele cucerite devin neutre, bombele armate sau în cooldown revin la IDLE (gata de
   plantat), coada de respawn se golește pe fiecare unitate. **Rolurile rămân** — o unitate de

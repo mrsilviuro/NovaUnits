@@ -1440,26 +1440,29 @@ void drawKillResetWinnerScreen() {
 }
 
 void drawKillResetDoneScreen(uint16_t points, uint8_t teamIndex, bool hasPoints) {
+    bool withPoints = (hasPoints && points > 0);
     display.clearDisplay();
     display.setTextSize(2);
     const char* msg = "DONE";
     uint8_t x = (SCREEN_WIDTH - (strlen(msg) * 12)) / 2;
-    display.setCursor(x, 24);
+    // Singur pe ecran, "DONE" sta la mijloc (24..40). Cu punctele dedesubt urca,
+    // ca cele trei randuri sa aiba spatii egale: 6..22, 33..41, 51..59.
+    display.setCursor(x, withPoints ? 6 : 24);
     display.print(msg);
-    if (hasPoints && points > 0) {
+    if (withPoints) {
         display.setTextSize(1);
         char buf[25];
         snprintf(buf, sizeof(buf), "+%u", points);
         uint8_t pw = strlen(buf) * 6;
         uint8_t totalW = pw + 2 + 7;
         uint8_t sx = (SCREEN_WIDTH - totalW) / 2;
-        display.setCursor(sx, 40);
+        display.setCursor(sx, 33);
         display.print(buf);
-        display.drawBitmap(sx + pw + 2, 40, POINT_BMP, 7, 7, SSD1306_WHITE);
+        display.drawBitmap(sx + pw + 2, 33, POINT_BMP, 7, 7, SSD1306_WHITE);
         char team[20];
         snprintf(team, sizeof(team), "for %s", TEAM_NAMES[teamIndex]);
         x = (SCREEN_WIDTH - (strlen(team) * 6)) / 2;
-        display.setCursor(x, 52);
+        display.setCursor(x, 51);
         display.print(team);
     }
     display.display();
@@ -1505,21 +1508,22 @@ void drawFieldResetDoneScreen() {
 
 void drawBonusScreen(uint16_t points, uint8_t teamIndex) {
     display.clearDisplay();
+    // Titlu 16px + doua randuri de 8px, cu spatii egale: 6..22, 33..41, 51..59.
     display.setTextSize(2);
     const char* l1 = "BONUS!";
     uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 12)) / 2;
-    display.setCursor(x, 12);
+    display.setCursor(x, 6);
     display.print(l1);
     display.setTextSize(1);
     char buf[20];
     snprintf(buf, sizeof(buf), "+%u points", points);
     x = (SCREEN_WIDTH - (strlen(buf) * 6)) / 2;
-    display.setCursor(x, 36);
+    display.setCursor(x, 33);
     display.print(buf);
     char team[20];
     snprintf(team, sizeof(team), "for %s", TEAM_NAMES[teamIndex - 1]);
     x = (SCREEN_WIDTH - (strlen(team) * 6)) / 2;
-    display.setCursor(x, 50);
+    display.setCursor(x, 51);
     display.print(team);
     display.display();
 }
