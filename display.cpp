@@ -14,6 +14,9 @@ static const uint16_t BOOT_NOTES[]     = {523, 659, 784, 1046, 0};
 static const uint16_t NOTE_DURATIONS[]  = {150, 150, 150, 300, 100};
 static const uint8_t  TOTAL_NOTES       = 5;
 
+// Ecranul comun de confirmare cu card de admin (definit mai jos, folosit si mai sus)
+static void drawAdminTagRequest(const char* action);
+
 static uint32_t bootStartTime = 0;
 static uint8_t  lastCountdown = 255;  // 255 = valoare imposibila -> forteaza primul draw
 static bool     melodyPlaying = true;
@@ -1057,17 +1060,7 @@ void drawExpImpWait() {
     display.display();
 }
 
-void drawExportWait() {
-    display.clearDisplay();
-    display.setTextSize(1);
-    const char* l1 = "Place admin card";
-    uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
-    display.setCursor(x, 20); display.print(l1);
-    const char* l2 = "to export ...";
-    x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
-    display.setCursor(x, 32); display.print(l2);
-    display.display();
-}
+void drawExportWait() { drawAdminTagRequest("Export game data"); }
 
 void drawExportDone(const char* l1, const char* l2) {
     display.clearDisplay();
@@ -1079,17 +1072,7 @@ void drawExportDone(const char* l1, const char* l2) {
     display.display();
 }
 
-void drawImportWait() {
-    display.clearDisplay();
-    display.setTextSize(1);
-    const char* l1 = "Place admin card";
-    uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
-    display.setCursor(x, 20); display.print(l1);
-    const char* l2 = "to import ...";
-    x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
-    display.setCursor(x, 32); display.print(l2);
-    display.display();
-}
+void drawImportWait() { drawAdminTagRequest("Import game data"); }
 
 void drawAdminPages(const AdminContext& ac) {
     display.clearDisplay();
@@ -1375,20 +1358,39 @@ void drawBoomScreen() {
 }
 
 // ============================================================
-// drawWaitAdminTag() — confirmare actiune prin card admin
+// drawAdminTagRequest() — ecranul comun de confirmare cu card de admin.
+// 'action' spune ce urmeaza sa se intample, pe un singur rand: la
+// textSize(1) incap 21 de caractere pe latimea ecranului.
+// Toate confirmarile cu card trec pe aici, ca sa arate la fel.
 // ============================================================
-void drawWaitAdminTag() {
+static void drawAdminTagRequest(const char* action) {
     display.clearDisplay();
     display.setTextSize(1);
-    const char* l1 = "Please present";
-    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
-    display.setCursor(x, 24);
-    display.print(l1);
-    const char* l2 = "Admin tag ...";
+    uint8_t w = (uint8_t)(strlen(action) * 6);
+    uint8_t x = (w < SCREEN_WIDTH) ? (uint8_t)((SCREEN_WIDTH - w) / 2) : 0;
+    display.setCursor(x, 14);
+    display.print(action);
+    const char* l2 = "Please present";
     x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
-    display.setCursor(x, 36);
+    display.setCursor(x, 32);
     display.print(l2);
+    const char* l3 = "Admin tag ...";
+    x = (SCREEN_WIDTH - (strlen(l3) * 6)) / 2;
+    display.setCursor(x, 44);
+    display.print(l3);
     display.display();
+}
+
+// action: 0=start, 1=pauza, 2=resume, 3=reset ceas (= pendingAdminAction)
+void drawWaitAdminTag(uint8_t action) {
+    const char* a;
+    switch (action) {
+        case 0:  a = "Start game";  break;
+        case 1:  a = "Pause game";  break;
+        case 2:  a = "Resume game"; break;
+        default: a = "Reset time";  break;
+    }
+    drawAdminTagRequest(a);
 }
 
 // ============================================================
@@ -1402,19 +1404,7 @@ void setBrightness(uint8_t level) {
 // ============================================================
 // Ecrane KILL RESET
 // ============================================================
-void drawKillResetAdminScreen() {
-    display.clearDisplay();
-    display.setTextSize(1);
-    const char* l1 = "Please present";
-    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
-    display.setCursor(x, 20);
-    display.print(l1);
-    const char* l2 = "Admin tag ...";
-    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
-    display.setCursor(x, 32);
-    display.print(l2);
-    display.display();
-}
+void drawKillResetAdminScreen() { drawAdminTagRequest("Release all kills"); }
 
 void drawKillResetConfirmScreen() {
     display.clearDisplay();
@@ -1478,23 +1468,7 @@ void drawKillResetDoneScreen(uint16_t points, uint8_t teamIndex, bool hasPoints)
 // ============================================================
 // Ecrane Points Reset (pagina 2 -> VERDE, confirmat cu cardul de admin)
 // ============================================================
-void drawPointsResetAdminScreen() {
-    display.clearDisplay();
-    display.setTextSize(1);
-    const char* l1 = "Reset all scores";
-    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
-    display.setCursor(x, 14);
-    display.print(l1);
-    const char* l2 = "Please present";
-    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
-    display.setCursor(x, 32);
-    display.print(l2);
-    const char* l3 = "Admin tag ...";
-    x = (SCREEN_WIDTH - (strlen(l3) * 6)) / 2;
-    display.setCursor(x, 44);
-    display.print(l3);
-    display.display();
-}
+void drawPointsResetAdminScreen() { drawAdminTagRequest("Reset all scores"); }
 
 void drawPointsResetDoneScreen() {
     display.clearDisplay();
@@ -1513,23 +1487,7 @@ void drawPointsResetDoneScreen() {
 // ============================================================
 // Ecrane Field Reset (pagina 1 -> VERDE, confirmat cu cardul de admin)
 // ============================================================
-void drawFieldResetAdminScreen() {
-    display.clearDisplay();
-    display.setTextSize(1);
-    const char* l1 = "Release all units";
-    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
-    display.setCursor(x, 14);
-    display.print(l1);
-    const char* l2 = "Please present";
-    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
-    display.setCursor(x, 32);
-    display.print(l2);
-    const char* l3 = "Admin tag ...";
-    x = (SCREEN_WIDTH - (strlen(l3) * 6)) / 2;
-    display.setCursor(x, 44);
-    display.print(l3);
-    display.display();
-}
+void drawFieldResetAdminScreen() { drawAdminTagRequest("Release all units"); }
 
 void drawFieldResetDoneScreen() {
     display.clearDisplay();
