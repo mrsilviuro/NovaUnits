@@ -332,16 +332,14 @@ void drawUnitBusyScreen(uint8_t reason) {
         case 1:  l2 = "Bomb is planted";    break;
         default: l2 = "Players in queue";   break;
     }
+    // Doua randuri de 8px, bloc centrat pe verticala: 18..46, mijloc 32.
     display.clearDisplay();
     display.setTextSize(1);
     const char* l1 = "--- UNIT BUSY ---";
     uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
-    display.setCursor(x, 8);  display.print(l1);
+    display.setCursor(x, 18); display.print(l1);
     x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
-    display.setCursor(x, 26); display.print(l2);
-    const char* l3 = "Use RELEASE on page 1";
-    x = (SCREEN_WIDTH - strlen(l3) * 6) / 2;
-    display.setCursor(x, 44); display.print(l3);
+    display.setCursor(x, 38); display.print(l2);
     display.display();
 }
 
