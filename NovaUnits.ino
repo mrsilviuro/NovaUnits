@@ -114,6 +114,8 @@ uint8_t    ptsResetSeq[MAX_UNITS] = {0};   // ultimul seq PTSRESET aplicat per u
 uint32_t   fieldResetAdminStart = 0;   // fereastra de 3s 'prezinta cardul' (eliberare unitati)
 uint32_t   fieldResetDoneStart  = 0;
 uint8_t    fieldResetSeq[MAX_UNITS] = {0};   // ultimul seq FIELDRESET aplicat per unitate
+uint32_t   gameResetDoneStart  = 0;          // ecranul de 2s "GAME RESET"
+uint8_t    gameResetSeq[MAX_UNITS] = {0};    // ultimul seq GAMERESET aplicat per unitate
 bool       timeSyncFreezing    = false; // maestrul: ingheata countdown-ul cat trimite TIME_SYNC
 
 // --- Card puncte (bonus) ---
@@ -564,6 +566,51 @@ void applyFieldReset() {
 }
 
 // ============================================================
+// applyGameReset() — joc nou de la zero.
+// Sterge TOATA starea de joc: sectoare neutre, bombe dezamorsate, coada de
+// respawn goala, puncte si kill-uri pe zero, ceas readus la limita, jocul
+// oprit (ca inainte de primul START).
+// NU atinge: modurile unitatilor (sector ramane sector, respawn isi pastreaza
+// echipa — ea e rolul lui), setarile de joc si sincronizarea/sesiunea de retea.
+// ============================================================
+void applyGameReset() {
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        UnitRow& r = unitTable[u];
+        if (r.mode == 1 || r.mode == 2) {   // sector / bomba: eliberam si proprietarul
+            r.status = 0;                   // SEC_NEUTRAL / BOMB_IDLE
+            r.team   = TEAM_NEUTRAL;
+        }                                   // mode 3: echipa de respawn e rolul, ramane
+        r.actionTime = 0;
+        for (uint8_t t = 0; t < 4; t++) { r.savedPoints[t] = 0; r.kills[t] = 0; }
+        liveCapture[u]   = 0;
+        lastPointTick[u] = 0;
+    }
+    for (uint8_t t = 0; t < 4; t++) appliedPenalties[t] = 0;
+    queueCount = queueHead = queueTail = 0;
+    respawnWindowStart = 0;
+
+    // ceasul revine la limita, jocul e "nepornit" (nu pe pauza, nu terminat)
+    gameTimeLeftSeconds = gameTimeLimitSeconds;
+    isGameTimerRunning  = false;
+    isGamePaused        = false;
+    isTimeOut           = false;
+    conquestWinner      = TEAM_NEUTRAL;
+    lastTimerTick       = millis();
+    gameFreezeStart     = millis();   // cronometrele repornesc de aici, la urmatorul START
+
+    // efecte locale in curs
+    isBombBeeping = false;
+    flashStep     = 0;
+    noTone(PIN_BUZZER);
+    currentAction = ACT_NONE;
+    emitterApplyArmed = false;
+    sectorApplyArmed  = false;
+    refreshLEDs();
+    needsDisplayUpdate = true;
+    Serial.println("[GAME] RESET COMPLET: stare, scoruri, kill-uri si ceas la zero.");
+}
+
+// ============================================================
 // doReboot() — ecran REBOOTING + beep continuu + restart
 // ============================================================
 void doReboot() {
@@ -962,6 +1009,20 @@ void loop() {
                 applyFieldReset();
                 tone(PIN_BUZZER, 1500, 200);
             }
+        } else if (ev == LORA_EVT_GAMERESET) {
+            uint8_t gu = loraEvtUnit - 1;
+            if (loraEvtSeq != gameResetSeq[gu]) {   // filtru dublaj: copia a doua are acelasi seq
+                gameResetSeq[gu] = loraEvtSeq;
+                applyGameReset();
+                // Sirena 2s DOAR pe receptoare: pe teren se aude ca alerta a ajuns peste tot.
+                digitalWrite(PIN_RELAY, LOW);
+                isRelayActive    = true;
+                relayTurnOffTime = now + 2000;
+                gameResetDoneStart = now;
+                currentState = STATE_GAME_RESET_DONE;
+                needsDisplayUpdate = true;
+                tone(PIN_BUZZER, 1500, 300);
+            }
         } else if (ev == LORA_EVT_TIME_SYNC) {
             if (isGameTimerRunning && !isGamePaused && currentWinCondition != WIN_BY_CONQUEST) {
                 gameTimeLeftSeconds = loraTimeSyncSec;   // corectam drift-ul: snap la timpul maestrului
@@ -969,6 +1030,16 @@ void loop() {
                 needsDisplayUpdate = true;
             }
         }
+    }
+
+    // O unitate fara rol nu are ce cauta pe cele 6 pagini de joc (pagina 1 ar fi
+    // goala si nu s-ar putea face nimic). Invariantul e verificat central, ca sa
+    // acopere orice traseu care ar ajunge acolo — inclusiv unele viitoare.
+    if (currentState == STATE_PAGES && selectedMode == -1) {
+        currentState = STATE_MENU;
+        menuIndex    = 0;
+        currentPage  = 0;
+        needsDisplayUpdate = true;
     }
 
     // Refresh registre display — previne "drift"-ul de imagine
@@ -1444,6 +1515,15 @@ void loop() {
             }
             break;
         }
+
+        case STATE_GAME_RESET_DONE:
+            if (needsDisplayUpdate) { drawGameResetScreen(); needsDisplayUpdate = false; }
+            if (millis() - gameResetDoneStart >= 2000) {
+                currentPage  = 0;
+                currentState = (selectedMode == -1) ? STATE_MENU : STATE_PAGES;
+                needsDisplayUpdate = true;
+            }
+            break;
 
         case STATE_FIELD_RESET_DONE:
             if (needsDisplayUpdate) { drawFieldResetDoneScreen(); needsDisplayUpdate = false; }
@@ -2058,7 +2138,7 @@ void onShortPress(uint8_t btnIndex) {
         if (btnIndex == 2) {            // VERDE — scroll jos
             adminMenuIndex++;
             if (adminMenuIndex == 6 && selectedMode == -1) adminMenuIndex++;
-            if (adminMenuIndex >= 9) {
+            if (adminMenuIndex >= 10) {
                 adminMenuIndex = 0;
                 adminScrollIndex = 0;
             } else {
@@ -2155,10 +2235,29 @@ void onShortPress(uint8_t btnIndex) {
                     tone(PIN_BUZZER, 1000, 300);
                 }
             } else if (adminMenuIndex == 7) {
+                // GAME RESET — joc nou: totul de la zero, mai putin modurile si setarile.
+                // Blocat doar cat timp jocul chiar ruleaza (la game over merge — de
+                // aceea exista: altfel nu se putea porni o runda noua fara reboot).
+                if (gameplayRunning()) {
+                    blockMsgStart = millis();
+                    currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else {
+                    applyGameReset();
+                    loraSendGameReset();          // anuntam reteaua
+                    gameResetDoneStart = millis();
+                    currentState = STATE_GAME_RESET_DONE;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 1500, 300);
+                    // Releul NU se pulseaza aici: sirena e pentru teren, iar cel care a
+                    // dat comanda stie deja. Suna doar pe unitatile care primesc alerta.
+                }
+            } else if (adminMenuIndex == 8) {
                 // SYSTEM RESTART — anuntam reteaua, apoi reboot
                 loraSendRestart();
                 doReboot();
-            } else if (adminMenuIndex == 8) {
+            } else if (adminMenuIndex == 9) {
                 // POWER OFF
                 currentState = STATE_POWER_OFF;
                 powerOffStart = millis();

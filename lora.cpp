@@ -35,6 +35,7 @@ uint8_t  syncedByUnit    = 0;
 #define CARDPTS_PKT_LEN   9     // [NET][TYPE][UNIT][team][pts_hi][pts_lo][seq][SES][CRC]
 #define PTSRESET_PKT_LEN  6     // [NET][TYPE][UNIT][seq][SES][CRC]
 #define FIELDRESET_PKT_LEN 6    // [NET][TYPE][UNIT][seq][SES][CRC]
+#define GAMERESET_PKT_LEN  6    // [NET][TYPE][UNIT][seq][SES][CRC]
 #define HEARTBEAT_PKT_LEN 5     // [NET][TYPE][UNIT][SES][CRC] (bateria e deja in UNIT)
 #define TIME_SYNC_PKT_LEN 7     // [NET][TYPE][UNIT][sec_hi][sec_lo][SES][CRC]
 
@@ -464,6 +465,21 @@ void loraSendFieldReset() {
     Serial.print("[LORA] FIELDRESET pus in coada, seq="); Serial.println(seq);
 }
 
+// Joc nou. Acelasi filtru de dublaj prin contor de secventa ca la PTSRESET/FIELDRESET.
+void loraSendGameReset() {
+    if (!isSynced) return;
+    static uint8_t seq = (uint8_t)random(1, 256);
+    seq++;
+    uint8_t buf[GAMERESET_PKT_LEN];
+    buf[0] = (uint8_t)NETWORK_ID;
+    buf[1] = PKT_GAMERESET;
+    buf[2] = unitByte();
+    buf[3] = seq;
+    sealPacket(buf, GAMERESET_PKT_LEN);
+    loraQueueSendDup(buf, GAMERESET_PKT_LEN);
+    Serial.print("[LORA] GAMERESET pus in coada, seq="); Serial.println(seq);
+}
+
 void loraSendRespawn(uint8_t team, uint16_t totalKills) {
     if (!isSynced) return;
     uint8_t buf[RESPAWN_PKT_LEN];
@@ -548,6 +564,7 @@ LoraEvent loraPoll() {
             else if (rxBuf[1] == PKT_CARDPTS)    rxLen = CARDPTS_PKT_LEN;
             else if (rxBuf[1] == PKT_PTSRESET)   rxLen = PTSRESET_PKT_LEN;
             else if (rxBuf[1] == PKT_FIELDRESET) rxLen = FIELDRESET_PKT_LEN;
+            else if (rxBuf[1] == PKT_GAMERESET)  rxLen = GAMERESET_PKT_LEN;
             else if (rxBuf[1] == PKT_RESPAWN)    rxLen = RESPAWN_PKT_LEN;
             else if (rxBuf[1] == PKT_BOMB_PLANT || rxBuf[1] == PKT_BOMB_DEFUSE) rxLen = BOMB_PKT_LEN;
             else if (rxBuf[1] == PKT_KILLRESET) rxLen = KILLRESET_PKT_LEN;
@@ -690,6 +707,20 @@ LoraEvent loraPoll() {
         Serial.print("[LORA] FIELDRESET de la unit "); Serial.print(u);
         Serial.print(" seq="); Serial.println(loraEvtSeq);
         return LORA_EVT_FIELDRESET;
+    }
+
+    // --- GAMERESET: joc nou pe toata reteaua ---
+    if (type == PKT_GAMERESET) {
+        if (!isSynced) return LORA_EVT_NONE;
+        uint8_t u = rxBuf[2] & 0x0F;
+        if (u == UNIT_ID) return LORA_EVT_NONE;
+        uint8_t batt = (rxBuf[2] >> 4) & 0x07;
+        if (u >= 1 && u <= MAX_UNITS) { globalBattery[u-1] = batt; lastSeenTime[u-1] = millis(); }
+        loraEvtUnit = u;
+        loraEvtSeq  = rxBuf[3];
+        Serial.print("[LORA] GAMERESET de la unit "); Serial.print(u);
+        Serial.print(" seq="); Serial.println(loraEvtSeq);
+        return LORA_EVT_GAMERESET;
     }
 
     if (type == PKT_RESPAWN) {

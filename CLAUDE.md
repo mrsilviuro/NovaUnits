@@ -172,8 +172,18 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   urmă ca pagina 2 să nu arate scoruri negative); sectoarele rămân cucerite, bombele armate,
   kill-urile neatinse.
 - **Admin** (card de admin sau combo Roșu+Albastru 3s): Game Settings, Bomb Parameters, Respawn
-  Rules, Sync Units, TAG Writer, Imp./Exp. Data, Change Mode, System Restart, Power Off. Cele
-  mai multe sunt **blocate cât timp jocul rulează** → `STATE_ADMIN_BLOCKED`.
+  Rules, Sync Units, TAG Writer, Imp./Exp. Data, Change Mode, **Game Reset**, System Restart,
+  Power Off. Cele mai multe sunt **blocate cât timp jocul rulează** → `STATE_ADMIN_BLOCKED`.
+  **Game Reset** (`PKT_GAMERESET`) repune jocul la starea de dinainte de primul START:
+  sectoare neutre, bombe dezamorsate, coadă goală, puncte și kill-uri pe zero, ceasul la
+  limită, `isTimeOut`/`conquestWinner` șterse. **Păstrează modurile unităților** (respawn-ul
+  își ține echipa), **setările** și **sincronizarea**. E singurul traseu care stinge
+  `isTimeOut`, deci singurul mod de a porni o rundă nouă după game over fără reboot.
+  Receptoarele pulsează releul 2s (sirena confirmă pe teren că alerta a ajuns); emițătorul
+  nu — cine a apăsat știe deja.
+- **Paginile de joc cer un rol.** Un invariant din `loop()` mută unitatea din `STATE_PAGES`
+  în `STATE_MENU` dacă `selectedMode == -1`. Verificarea e centrală tocmai ca să acopere
+  orice traseu, inclusiv unele adăugate ulterior.
 - Mașina de stări e un `switch (currentState)` uriaș în `loop()`; `needsDisplayUpdate` evită
   redesenarea inutilă. Auto-dim la 10% luminozitate + revenire la pagina 1 după 30s de
   inactivitate (`resetActivity()`).

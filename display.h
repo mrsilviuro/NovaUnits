@@ -155,6 +155,9 @@ void drawPointsResetDoneScreen();
 void drawFieldResetAdminScreen();
 void drawFieldResetDoneScreen();
 
+// Ecran Game Reset — joc nou (Admin Mode)
+void drawGameResetScreen();
+
 void drawBonusScreen(uint16_t points, uint8_t teamIndex);
 
 // Ecrane Sync (LoRa)
