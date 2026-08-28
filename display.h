@@ -170,4 +170,6 @@ void drawSyncedScreen(uint8_t fromUnitId);
 void drawSyncDoneScreen();
 void drawTimeAlertScreen(uint8_t action);
 void drawBlockedScreen();
+// reason: 0=sector cucerit, 1=bomba plantata, 2=jucatori in coada
+void drawUnitBusyScreen(uint8_t reason);
 void drawRespawnDupScreen();

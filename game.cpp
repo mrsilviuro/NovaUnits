@@ -82,6 +82,25 @@ int32_t teamScore(uint8_t team) {
     return total;
 }
 
+bool scoresAreZero() {
+    for (uint8_t u = 0; u < MAX_UNITS; u++) {
+        if (liveCapture[u] != 0) return false;
+        for (uint8_t t = 0; t < 4; t++)
+            if (unitTable[u].savedPoints[t] != 0) return false;
+    }
+    for (uint8_t t = 0; t < 4; t++)
+        if (appliedPenalties[t] != 0) return false;
+    return true;
+}
+
+bool killsAreZero() {
+    if (queueCount > 0) return false;   // coada locala se goleste tot la resetul de kill-uri
+    for (uint8_t u = 0; u < MAX_UNITS; u++)
+        for (uint8_t t = 0; t < 4; t++)
+            if (unitTable[u].kills[t] != 0) return false;
+    return true;
+}
+
 uint16_t teamKillTotal(uint8_t team) {
     uint32_t total = 0;
     for (uint8_t u = 0; u < MAX_UNITS; u++) total += unitTable[u].kills[team];
@@ -301,6 +320,28 @@ void drawBlockedScreen() {
     x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
     display.setCursor(x, 36);
     display.print(l2);
+    display.display();
+}
+
+// Change Mode refuzat pentru ca unitatea inca isi joaca rolul (nu pentru ca
+// jocul ruleaza — ala e drawBlockedScreen). Spunem exact ce o tine ocupata.
+void drawUnitBusyScreen(uint8_t reason) {
+    const char* l2;
+    switch (reason) {
+        case 0:  l2 = "Sector is captured"; break;
+        case 1:  l2 = "Bomb is planted";    break;
+        default: l2 = "Players in queue";   break;
+    }
+    display.clearDisplay();
+    display.setTextSize(1);
+    const char* l1 = "--- UNIT BUSY ---";
+    uint8_t x = (SCREEN_WIDTH - strlen(l1) * 6) / 2;
+    display.setCursor(x, 8);  display.print(l1);
+    x = (SCREEN_WIDTH - strlen(l2) * 6) / 2;
+    display.setCursor(x, 26); display.print(l2);
+    const char* l3 = "Use RELEASE on page 1";
+    x = (SCREEN_WIDTH - strlen(l3) * 6) / 2;
+    display.setCursor(x, 44); display.print(l3);
     display.display();
 }
 

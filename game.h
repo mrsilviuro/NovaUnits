@@ -34,6 +34,11 @@ extern uint32_t lastPointTick[MAX_UNITS];  // tick 10s per unitate cucerita
 int32_t  teamScore(uint8_t team);       // suma savedPoints + live local (fara penalizari)
 uint16_t teamKillTotal(uint8_t team);
 
+// "Mai e ceva de sters?" — filtre pentru resetarile de pe pagini: un reset care nu
+// schimba nimic tot ar ocupa aerul cu o alerta, deci il refuzam cu ton de fail.
+bool scoresAreZero();   // toate punctele, penalizarile si acumulatorii live sunt pe 0
+bool killsAreZero();    // niciun kill in tabel si nimeni in coada locala
+
 // --- Identitate rol unitate ---
 extern int8_t selectedMode;   // -1=nesetat, 0=Sector, 1=Bomb, 2=Respawn
 

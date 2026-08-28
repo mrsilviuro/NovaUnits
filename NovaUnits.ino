@@ -135,6 +135,7 @@ int32_t    sectorApplyPts      = 0;
 uint32_t   blockMsgStart       = 0;
 uint32_t   respawnWindowStart  = 0;
 GameState  blockReturnState    = STATE_ADMIN_MENU;
+uint8_t    unitBusyReason      = 0;   // 0=sector cucerit, 1=bomba plantata, 2=coada respawn
 
 // (selectedMode si starea de joc sunt in game.cpp — modelul/tabelul)
 
@@ -1574,6 +1575,14 @@ void loop() {
             }
             break;
 
+        case STATE_UNIT_BUSY:
+            if (needsDisplayUpdate) { drawUnitBusyScreen(unitBusyReason); needsDisplayUpdate = false; }
+            if (millis() - blockMsgStart >= 2500) {
+                currentState = blockReturnState;
+                needsDisplayUpdate = true;
+            }
+            break;
+
         case STATE_RESPAWN_DUP:
             if (needsDisplayUpdate) { drawRespawnDupScreen(); needsDisplayUpdate = false; }
             if (millis() - blockMsgStart >= 2000) {
@@ -1901,6 +1910,8 @@ void onShortPress(uint8_t btnIndex) {
                     currentState = STATE_ADMIN_BLOCKED;
                     needsDisplayUpdate = true;
                     tone(PIN_BUZZER, 300, 200);
+                } else if (scoresAreZero()) {
+                    tone(PIN_BUZZER, 200, 300);   // nimic de sters -> nu pornim procesul
                 } else {
                     ptsResetAdminStart = millis();
                     currentState = STATE_PTS_RESET_ADMIN;
@@ -1915,6 +1926,8 @@ void onShortPress(uint8_t btnIndex) {
                     currentState = STATE_ADMIN_BLOCKED;
                     needsDisplayUpdate = true;
                     tone(PIN_BUZZER, 300, 200);
+                } else if (killsAreZero()) {
+                    tone(PIN_BUZZER, 200, 300);   // niciun kill de sters -> nu pornim procesul
                 } else {
                     killResetAdminStart = millis();
                     currentState = STATE_KILL_RESET_ADMIN;
@@ -1935,6 +1948,8 @@ void onShortPress(uint8_t btnIndex) {
                     currentState = STATE_ADMIN_BLOCKED;
                     needsDisplayUpdate = true;
                     tone(PIN_BUZZER, 300, 200);
+                } else if (gameTimeLeftSeconds == gameTimeLimitSeconds) {
+                    tone(PIN_BUZZER, 200, 300);   // ceasul e deja la valoarea initiala
                 } else {
                     pendingAdminAction = 3;
                     waitAdminTagStart = millis();
@@ -2095,14 +2110,25 @@ void onShortPress(uint8_t btnIndex) {
                     tone(PIN_BUZZER, 1000, 50);
                 }
             } else if (adminMenuIndex == 6) {
-                // CHANGE MODE — blocat daca jocul ruleaza / sector cucerit / bomba armata / queue respawn
-                bool changeBlocked = gameActive
-                || (myRow().mode == 1 && myRow().status == SEC_CAPTURED)
-                || (myRow().mode == 2 && myRow().status == BOMB_ARMED)
-                || (queueCount > 0);
-                if (changeBlocked) {
+                // CHANGE MODE — doua motive diferite de refuz, cu mesaje diferite:
+                //   jocul ruleaza            -> "Can't do that while playing"
+                //   unitatea inca e in rol   -> "UNIT BUSY" + ce anume o tine ocupata
+                // Al doilea era afisat tot ca "while playing", ceea ce deruta adminul
+                // care tocmai pusese jocul pe pauza.
+                uint8_t busy = 255;
+                if      (myRow().mode == 1 && myRow().status == SEC_CAPTURED) busy = 0;
+                else if (myRow().mode == 2 && myRow().status == BOMB_ARMED)   busy = 1;
+                else if (queueCount > 0)                                      busy = 2;
+
+                if (gameActive) {
                     blockMsgStart = millis();
                     currentState = STATE_ADMIN_BLOCKED;
+                    needsDisplayUpdate = true;
+                    tone(PIN_BUZZER, 300, 200);
+                } else if (busy != 255) {
+                    unitBusyReason = busy;
+                    blockMsgStart = millis();
+                    currentState = STATE_UNIT_BUSY;
                     needsDisplayUpdate = true;
                     tone(PIN_BUZZER, 300, 200);
                 } else {

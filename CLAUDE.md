@@ -154,6 +154,15 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   Toate confirmările cu card trec prin `drawAdminTagRequest(action)` din `display.cpp`,
   care afișează pe primul rând ce urmează să se întâmple („Pause game", „Release all
   units", ...) — maxim 21 de caractere, cât încape pe un rând la `textSize(1)`.
+  **Fiecare resetare refuză un no-op** cu ton de fail, fără să deschidă fereastra de card:
+  scoruri deja pe 0 (`scoresAreZero()`), kill-uri deja pe 0 (`killsAreZero()`), ceas deja la
+  valoarea inițială. Motivul e că orice resetare pune radioul la treabă. Eliberarea de pe
+  pagina 1 **nu** are un astfel de filtru: cozile de respawn sunt stare locală pe fiecare
+  unitate, deci de aici nu se poate ști dacă altcineva mai are jucători în așteptare.
+- **Change Mode** distinge două motive de refuz: jocul rulează → „Can't do that while
+  playing"; unitatea e liberă de joc dar încă în rol (sector cucerit / bombă plantată /
+  coadă nevidă) → ecranul `UNIT BUSY`, care spune exact ce o ține ocupată și trimite la
+  eliberarea de pe pagina 1.
   **Eliberarea unităților** (`PKT_FIELDRESET`) pregătește terenul pentru o rundă nouă:
   sectoarele cucerite devin neutre, bombele armate sau în cooldown revin la IDLE (gata de
   plantat), coada de respawn se golește pe fiecare unitate. **Rolurile rămân** — o unitate de
