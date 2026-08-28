@@ -891,7 +891,8 @@ void loop() {
 
     // Heartbeat / TIME_SYNC: maestrul (cel care a dat sync) re-sincronizeaza periodic
     // timpul jocului, ca sa anuleze drift-ul de ceas dintre ESP-uri.
-    if (loraHeartbeatDue() && !isGamePaused) {                  // pe pauza amanam heartbeat-ul pana la resume
+    if (!isGamePaused && loraHeartbeatDue()) {                  // pe pauza amanam heartbeat-ul pana la resume
+                                                               // (ordinea conteaza: pe pauza nu consumam scadenta)
         if (isTimeMaster && isGameTimerRunning && !isGamePaused && !isTimeOut &&
             gameTimeLeftSeconds > 0 && currentWinCondition != WIN_BY_CONQUEST) {
             loraSendTimeSync((uint16_t)gameTimeLeftSeconds);   // single send -> o singura pauza
