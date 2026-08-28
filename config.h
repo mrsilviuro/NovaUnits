@@ -64,6 +64,7 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
 #define PKT_CARDPTS     0x10   // puncte de pe card: echipa X +Y puncte
 #define PKT_PTSRESET    0x11   // reset scoruri pe toata reteaua
 #define PKT_FIELDRESET  0x12   // eliberare unitati: sectoare neutre, bombe idle, cozi golite
+#define PKT_GAMERESET   0x13   // joc nou: totul de la zero, mai putin modurile si setarile
 
 // ============================================================
 // DISPLAY OLED (2.42" SSD1309 condus de libraria SSD1306)
@@ -150,6 +151,7 @@ enum GameState : uint8_t {
   STATE_PTS_RESET_DONE,
   STATE_FIELD_RESET_ADMIN,
   STATE_FIELD_RESET_DONE,
+  STATE_GAME_RESET_DONE,
   STATE_TIME_RESET_ADMIN,
   STATE_MODE_WARNING,
   STATE_SYNC_WARNING,

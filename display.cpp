@@ -991,10 +991,10 @@ void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) 
     display.print("Admin Mode");
     display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
 
-    const char* const items[9] = {"Game Settings", "Bomb Parameters", "Respawn Rules", "Sync Units", "TAG Writer", "Imp. / Exp. Data", "Change Mode", "System Restart", "Power Off"};
+    const char* const items[10] = {"Game Settings", "Bomb Parameters", "Respawn Rules", "Sync Units", "TAG Writer", "Imp. / Exp. Data", "Change Mode", "Game Reset", "System Restart", "Power Off"};
 
     uint8_t shown = 0;
-    for (uint8_t i = scrollIndex; i < 9; i++) {
+    for (uint8_t i = scrollIndex; i < 10; i++) {
         if (shown >= 5) break;
 
         // Ascundem Change Mode (index 6) daca nu avem mod selectat
@@ -1013,7 +1013,7 @@ void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) 
         shown++;
     }
 
-    uint8_t total = (selectedMode == -1) ? 8 : 9;
+    uint8_t total = (selectedMode == -1) ? 9 : 10;
     drawScrollbar(total, 5, scrollIndex, 13, 51);
     display.display();
 }
@@ -1500,6 +1500,21 @@ void drawFieldResetDoneScreen() {
     display.setCursor(x, 15);
     display.print(l1);
     const char* l2 = "RELEASED";
+    x = (SCREEN_WIDTH - (strlen(l2) * 12)) / 2;
+    display.setCursor(x, 37);
+    display.print(l2);
+    display.display();
+}
+
+// Joc nou: acelasi tipar ca celelalte ecrane de rezultat (doua randuri size 2)
+void drawGameResetScreen() {
+    display.clearDisplay();
+    display.setTextSize(2);
+    const char* l1 = "GAME";
+    uint8_t x = (SCREEN_WIDTH - (strlen(l1) * 12)) / 2;
+    display.setCursor(x, 15);
+    display.print(l1);
+    const char* l2 = "RESET";
     x = (SCREEN_WIDTH - (strlen(l2) * 12)) / 2;
     display.setCursor(x, 37);
     display.print(l2);
