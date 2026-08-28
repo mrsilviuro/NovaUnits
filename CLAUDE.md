@@ -180,7 +180,12 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   își ține echipa), **setările** și **sincronizarea**. E singurul traseu care stinge
   `isTimeOut`, deci singurul mod de a porni o rundă nouă după game over fără reboot.
   Receptoarele pulsează releul 2s (sirena confirmă pe teren că alerta a ajuns); emițătorul
-  nu — cine a apăsat știe deja.
+  nu — cine a apăsat știe deja. După ecranul de 2s, emițătorul revine în Admin Mode, iar
+  receptoarele în joc (`gameResetReturnState`).
+- **Game Reset și System Restart cer confirmare** — `STATE_CONFIRM_ACTION` cu
+  `drawConfirmActionScreen(action)`, același tipar ca la Sync Units: ROȘU = No (înapoi în
+  Admin Mode), ALBASTRU = Yes. Sunt singurele acțiuni ireversibile din meniu (una șterge
+  jocul în rețea, cealaltă repornește toate unitățile și pierde tot ce e în RAM).
 - **Paginile de joc cer un rol.** Un invariant din `loop()` mută unitatea din `STATE_PAGES`
   în `STATE_MENU` dacă `selectedMode == -1`. Verificarea e centrală tocmai ca să acopere
   orice traseu, inclusiv unele adăugate ulterior.

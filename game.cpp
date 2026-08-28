@@ -215,6 +215,40 @@ void drawSyncWarningScreen() {
     display.display();
 }
 
+// Confirmare pentru actiunile ireversibile din Admin Mode. Acelasi tipar ca la
+// Sync Units: rosu inseamna nu, albastru inseamna da.
+void drawConfirmActionScreen(uint8_t action) {
+    const char *l2, *l3, *l4;
+    if (action == 0) {            // Game Reset
+        l2 = "Scores, kills and";
+        l3 = "unit states will be";
+        l4 = "cleared everywhere.";
+    } else {                      // System Restart
+        l2 = "This unit and all";
+        l3 = "others will reboot";
+        l4 = "and lose game data.";
+    }
+    display.clearDisplay();
+    display.setTextSize(1);
+    uint8_t x;
+    const char* l1 = "--- WARNING ---";
+    x = (SCREEN_WIDTH - (strlen(l1) * 6)) / 2;
+    display.setCursor(x, 0);  display.print(l1);
+    x = (SCREEN_WIDTH - (strlen(l2) * 6)) / 2;
+    display.setCursor(x, 12); display.print(l2);
+    x = (SCREEN_WIDTH - (strlen(l3) * 6)) / 2;
+    display.setCursor(x, 22); display.print(l3);
+    x = (SCREEN_WIDTH - (strlen(l4) * 6)) / 2;
+    display.setCursor(x, 32); display.print(l4);
+    const char* l5 = "Continue?";
+    x = (SCREEN_WIDTH - (strlen(l5) * 6)) / 2;
+    display.setCursor(x, 42); display.print(l5);
+    const char* l6 = "RED: No     BLUE: Yes";
+    x = (SCREEN_WIDTH - (strlen(l6) * 6)) / 2;
+    display.setCursor(x, 56); display.print(l6);
+    display.display();
+}
+
 void drawModeWarningScreen() {
     display.clearDisplay();
     display.setTextSize(1);

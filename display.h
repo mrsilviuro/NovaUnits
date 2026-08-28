@@ -158,6 +158,10 @@ void drawFieldResetDoneScreen();
 // Ecran Game Reset — joc nou (Admin Mode)
 void drawGameResetScreen();
 
+// Confirmare pentru actiunile ireversibile din Admin Mode (RED: No / BLUE: Yes)
+// action: 0=Game Reset, 1=System Restart
+void drawConfirmActionScreen(uint8_t action);
+
 void drawBonusScreen(uint16_t points, uint8_t teamIndex);
 
 // Ecrane Sync (LoRa)
