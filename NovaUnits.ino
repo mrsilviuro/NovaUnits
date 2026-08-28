@@ -1339,7 +1339,7 @@ void loop() {
 
         case STATE_WAIT_ADMIN_TAG: {
             if (needsDisplayUpdate) {
-                drawWaitAdminTag();
+                drawWaitAdminTag(pendingAdminAction);
                 needsDisplayUpdate = false;
             }
             // Timeout 3 secunde fara card -> revenim pe pagina 6 + eroare

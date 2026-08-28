@@ -138,7 +138,7 @@ void drawTagWriter(uint8_t statusMsg);
 void drawActionScreen(ActionType actionType, uint8_t teamIndex, uint32_t elapsed, uint32_t totalMs);
 void drawSuccessScreen();
 void drawBoomScreen();
-void drawWaitAdminTag();
+void drawWaitAdminTag(uint8_t action);   // 0=start, 1=pauza, 2=resume, 3=reset ceas
 void setBrightness(uint8_t level);
 
 // Ecrane Kill Reset

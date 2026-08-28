@@ -151,6 +151,9 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   Verde are funcții contextuale: scroll pe 4/5, **eliberare unități pe 1**, **reset scoruri
   pe 2**, reset kill-uri pe 3, reset ceas pe 6. Cele patru resetări cer cardul de admin
   (fereastră de 3s) și trimit alertă în rețea; sunt independente între ele.
+  Toate confirmările cu card trec prin `drawAdminTagRequest(action)` din `display.cpp`,
+  care afișează pe primul rând ce urmează să se întâmple („Pause game", „Release all
+  units", ...) — maxim 21 de caractere, cât încape pe un rând la `textSize(1)`.
   **Eliberarea unităților** (`PKT_FIELDRESET`) pregătește terenul pentru o rundă nouă:
   sectoarele cucerite devin neutre, bombele armate sau în cooldown revin la IDLE (gata de
   plantat), coada de respawn se golește pe fiecare unitate. **Rolurile rămân** — o unitate de
