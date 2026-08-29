@@ -478,15 +478,26 @@ void applyTimerAction(uint8_t action) {
 // ============================================================
 // applyCapture() / applyNeutralize() — folosite si local (dupa AUX LOW) si la receptie
 // ============================================================
-void applyCapture(uint8_t u, uint8_t team) {
-    unitTable[u].status     = SEC_CAPTURED;
-    unitTable[u].team       = (Team)team;
-    unitTable[u].actionTime = millis();
-    liveCapture[u]   = 0;
-    lastPointTick[u] = millis();
+// 'ageMs' = cu cat s-a intarziat alerta fata de momentul real al actiunii. E zero
+// pentru actiunea proprie si pentru prima copie a unei alerte; e slotul emitatorului
+// cand prima copie s-a pierdut si a ajuns doar retransmisia (vezi loraEvtAgeMs).
+// Fara antidatare, o unitate care rateaza prima copie porneste tick-ul de 10s cu
+// ~UNIT_ID*0.7s mai tarziu decat sursa si ramane permanent cu un tick in urma.
+static uint32_t backdated(uint32_t ageMs) {
+    uint32_t now = millis();
+    return (ageMs < now) ? (now - ageMs) : now;   // fara subcurgere in primele secunde de la boot
 }
 
-void applyNeutralize(uint8_t u, uint8_t team, int32_t exactPts) {
+void applyCapture(uint8_t u, uint8_t team, uint32_t ageMs) {
+    uint32_t t = backdated(ageMs);
+    unitTable[u].status     = SEC_CAPTURED;
+    unitTable[u].team       = (Team)team;
+    unitTable[u].actionTime = t;
+    liveCapture[u]   = 0;
+    lastPointTick[u] = t;
+}
+
+void applyNeutralize(uint8_t u, uint8_t team, int32_t exactPts, uint32_t ageMs) {
     if (team >= 1 && team <= 4) {
         unitTable[u].savedPoints[team - 1] -= liveCapture[u];   // scot estimarea live
         unitTable[u].savedPoints[team - 1] += exactPts;         // pun valoarea exacta (de la sursa)
@@ -495,7 +506,7 @@ void applyNeutralize(uint8_t u, uint8_t team, int32_t exactPts) {
     lastPointTick[u] = 0;
     unitTable[u].status     = SEC_NEUTRAL;
     unitTable[u].team       = TEAM_NEUTRAL;
-    unitTable[u].actionTime = millis();
+    unitTable[u].actionTime = backdated(ageMs);
 }
 
 // ============================================================
@@ -884,8 +895,8 @@ void loop() {
         emitterApplyArmed = false;
     }
     if (sectorApplyArmed && loraTxIdle()) {    // alerta de sector a iesit (AUX LOW) -> aplicam local
-        if (sectorApplyType == 0) applyCapture(UNIT_ID - 1, sectorApplyTeam);
-        else                      applyNeutralize(UNIT_ID - 1, sectorApplyTeam, sectorApplyPts);
+        if (sectorApplyType == 0) applyCapture(UNIT_ID - 1, sectorApplyTeam, 0);
+        else                      applyNeutralize(UNIT_ID - 1, sectorApplyTeam, sectorApplyPts, 0);
         sectorApplyArmed = false;
     }
 
@@ -942,13 +953,13 @@ void loop() {
             }
         } else if (ev == LORA_EVT_CAPTURE) {
             if (unitTable[loraEvtUnit - 1].status != SEC_CAPTURED) {   // ignoram copia dubla
-                applyCapture(loraEvtUnit - 1, loraEvtTeam);
+                applyCapture(loraEvtUnit - 1, loraEvtTeam, loraEvtAgeMs());
                 tone(PIN_BUZZER, 1800, 600);   // doar audio (fara LED/ecran)
                 needsDisplayUpdate = true;
             }
         } else if (ev == LORA_EVT_NEUTRALIZE) {
             if (unitTable[loraEvtUnit - 1].status == SEC_CAPTURED) {    // ignoram copia dubla
-                applyNeutralize(loraEvtUnit - 1, loraEvtTeam, loraEvtPoints);
+                applyNeutralize(loraEvtUnit - 1, loraEvtTeam, loraEvtPoints, loraEvtAgeMs());
                 tone(PIN_BUZZER, 1800, 600);   // doar audio (fara LED/ecran)
                 needsDisplayUpdate = true;
             }
@@ -966,7 +977,7 @@ void loop() {
                 unitTable[loraEvtUnit - 1].mode       = 2;
                 unitTable[loraEvtUnit - 1].status     = BOMB_ARMED;
                 unitTable[loraEvtUnit - 1].team       = (Team)loraEvtTeam;
-                unitTable[loraEvtUnit - 1].actionTime = now;
+                unitTable[loraEvtUnit - 1].actionTime = backdated(loraEvtAgeMs());
                 tone(PIN_BUZZER, 1800, 600);
                 needsDisplayUpdate = true;
             }
@@ -974,7 +985,7 @@ void loop() {
             if (unitTable[loraEvtUnit - 1].status == BOMB_ARMED) {   // ignoram copia dubla / cursa cu explozia
                 unitTable[loraEvtUnit - 1].status     = BOMB_COOLDOWN;
                 unitTable[loraEvtUnit - 1].team       = TEAM_NEUTRAL;
-                unitTable[loraEvtUnit - 1].actionTime = now;            // start cooldown
+                unitTable[loraEvtUnit - 1].actionTime = backdated(loraEvtAgeMs());   // start cooldown
                 if (loraEvtTeam >= 1 && loraEvtTeam <= 4)
                     unitTable[loraEvtUnit - 1].savedPoints[loraEvtTeam - 1] += (int32_t)bombPointsDefuse;
                 tone(PIN_BUZZER, 1800, 600);

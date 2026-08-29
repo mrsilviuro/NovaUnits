@@ -15,6 +15,14 @@ uint8_t  loraEvtUnit     = 0;
 uint8_t  loraEvtTeam     = 0;
 int32_t  loraEvtPoints   = 0;
 uint8_t  loraEvtSeq      = 0;
+bool     loraEvtIsDup    = false;   // pachetul curent e copia a doua a alertei?
+
+// Cat de veche e actiunea pe care tocmai am primit-o.
+// Copia a doua pleaca dintr-un slot determinist derivat din UNIT_ID-ul emitatorului
+// (UNIT_ID * TX_SLOT_MS + jitter). Daca prima copie s-a pierdut si vedem doar
+// dublura, stim exact cu cat s-a intarziat si putem antidata cronometrele, ca
+// receptorul sa nu numere de la un moment mai tarziu decat sursa.
+uint32_t loraEvtAgeMs();
 uint32_t lastLocalTick   = 0;
 bool     localTimePaused = false;
 bool     isSynced        = false;
@@ -111,6 +119,8 @@ static void loraQueueSend(const uint8_t* buf, uint8_t len) {
     heartbeatReschedule();   // orice transmisie reseteaza timerul de heartbeat
 }
 
+static void sealPacket(uint8_t* buf, uint8_t len);   // definita mai jos
+
 // A doua copie a unei alerte se trimite intr-un SLOT determinist pe baza UNIT_ID,
 // ca benzile celor 12 unitati sa fie disjuncte (copia a 2-a a doua unitati nu se mai
 // poate suprapune niciodata). SLOT > airtime maxim (la SF10 ~400ms).
@@ -128,6 +138,8 @@ static void loraQueueSendDup(const uint8_t* buf, uint8_t len) {
     for (uint8_t i = 0; i < TX_DEFER_SIZE; i++) {
         if (deferTime[i] == 0) {
             memcpy(deferBuf[i], buf, len);
+            deferBuf[i][2] |= PKT_DUP_FLAG;      // "sunt retransmisia"
+            sealPacket(deferBuf[i], len);        // CRC recalculat peste octetul schimbat
             deferLen[i]  = len;
             uint32_t t = millis() + (uint32_t)UNIT_ID * TX_SLOT_MS + (uint32_t)random(0, TX_SLOT_RAND);
             if (t == 0) t = 1;   // 0 e rezervat pentru "slot liber"
@@ -405,6 +417,12 @@ void loraSendTime(uint8_t pktType, uint16_t timeVal) {
 
 bool loraTxIdle() { return txCount == 0 && txState == TX_IDLE; }
 
+uint32_t loraEvtAgeMs() {
+    if (!loraEvtIsDup) return 0;                       // prima copie: fara intarziere de slot
+    if (loraEvtUnit < 1 || loraEvtUnit > MAX_UNITS) return 0;
+    return (uint32_t)loraEvtUnit * TX_SLOT_MS + TX_SLOT_RAND / 2;   // mijlocul jitterului
+}
+
 // ============================================================
 // loraSendCapture() / loraSendNeutralize() — alerte sector (background)
 // ============================================================
@@ -601,6 +619,7 @@ LoraEvent loraPoll() {
     if (rxLen == 0 || rxCount < rxLen) return LORA_EVT_NONE;
 
     uint8_t type = rxBuf[1];
+    loraEvtIsDup = (rxBuf[2] & PKT_DUP_FLAG) != 0;
     uint8_t len  = rxLen;
     rxCount = 0; rxLen = 0;            // pachet complet — il consumam
 

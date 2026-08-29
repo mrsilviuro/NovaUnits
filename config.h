@@ -66,6 +66,12 @@ const uint8_t PIN_BTNS[4] = { 13, 14, 26, 27 };
 #define PKT_FIELDRESET  0x12   // eliberare unitati: sectoare neutre, bombe idle, cozi golite
 #define PKT_GAMERESET   0x13   // joc nou: totul de la zero, mai putin modurile si setarile
 
+// Bitul 7 din octetul 2 (unitByte) marcheaza COPIA A DOUA a unei alerte. Restul
+// octetului e unit (biti 3:0) + baterie (biti 6:4), iar toti receptorii mascheaza
+// deja acele campuri, deci bitul nu deranjeaza nicio decodare existenta.
+// Foloseste la antidatare: cine vede doar dublura stie cu cat s-a intarziat.
+#define PKT_DUP_FLAG    0x80
+
 // ============================================================
 // DISPLAY OLED (2.42" SSD1309 condus de libraria SSD1306)
 // ============================================================
