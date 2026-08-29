@@ -31,6 +31,8 @@ extern uint8_t loraEvtUnit;     // unitatea sursa (1..12) pt CAPTURE/NEUTRALIZE
 extern uint8_t loraEvtTeam;     // echipa (1..4)
 extern int32_t loraEvtPoints;   // puncte exacte (NEUTRALIZE) / Y puncte (CARDPTS)
 extern uint8_t loraEvtSeq;      // contor scanare card (filtru dublaj CARDPTS)
+extern bool    loraEvtIsDup;    // pachetul primit e copia a doua a alertei
+uint32_t loraEvtAgeMs();        // cu cat s-a intarziat actiunea primita (0 pentru prima copie)
 extern uint8_t loraTimeAction;  // 0=start,1=pause,2=resume,3=reset (setat de loraPoll la LORA_EVT_TIME)
 extern uint16_t loraResumeTime;  // secunda primita in alerta de RESUME (setata de loraPoll)
 extern uint16_t loraTimeSyncSec; // secunda primita in TIME_SYNC (de la maestru)

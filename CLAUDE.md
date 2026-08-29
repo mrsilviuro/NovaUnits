@@ -113,7 +113,14 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   ca benzile celor 12 unități să nu se suprapună. De aceea **fiecare handler de recepție are
   un filtru de dublaj** — verificare de stare (`status != SEC_CAPTURED`), fereastră de timp
   (≥12s pentru TIME/KILLRESET) sau contor `seq` (CARDPTS). Dacă adaugi un tip de pachet nou,
-  **trebuie să-i proiectezi și filtrul de dublaj**. Preferă un octet de **secvență**
+  **trebuie să-i proiectezi și filtrul de dublaj**.
+  Copia a doua e marcată cu **bitul 7 al octetului 2** (`PKT_DUP_FLAG`) și resigilată; toți
+  receptorii maschează deja unit (biți 3:0) și baterie (biți 6:4), deci bitul nu deranjează
+  nicio decodare. Cine vede **doar** dublura știe că acțiunea s-a petrecut acum
+  `loraEvtAgeMs()` = `UNIT_ID_emițător * 700ms + 100`, și **antidatează** cronometrele:
+  `applyCapture`/`applyNeutralize` primesc `ageMs`, iar BOMB_PLANT/BOMB_DEFUSE folosesc
+  `backdated()`. Fără asta, o unitate care ratează prima copie pornea tick-ul de 10s mai
+  târziu decât sursa și rămânea permanent cu un tick în urmă. Preferă un octet de **secvență**
   (`PKT_CARDPTS`, `PKT_PTSRESET`) în locul unei ferestre de timp: fereastra trebuie să fie
   mai lată decât slotul copiei a doua (~8.4s) și atunci respinge și două acțiuni legitime
   apropiate — exact ce se întâmplă azi la `PKT_TIME_*` și `PKT_KILLRESET`.
