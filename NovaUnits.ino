@@ -204,6 +204,22 @@ void updateBattery() {
 // ============================================================
 // buildAdminContext() — impacheteaza indicii admin pentru drawAdminPages
 // ============================================================
+// ============================================================
+// adminHiddenMask() — ce randuri din meniul Admin nu se afiseaza acum.
+// Tiparul din proiect: ascundem ce e fara sens in starea curenta, blocam cu mesaj
+// ce e doar temporar interzis.
+//   Change Mode : fara rol nu ai ce schimba.
+//   Game Reset  : apare doar cand exista un joc de resetat — pe pauza sau dupa game
+//                 over. Nepornit nu ai ce reseta (pagina 6 ofera START), iar dupa un
+//                 Game Reset jocul e din nou nepornit, deci randul dispare la loc.
+// ============================================================
+static uint16_t adminHiddenMask() {
+    uint16_t m = 0;
+    if (selectedMode == -1)            m |= (1u << 6);   // Change Mode
+    if (!isGamePaused && !isTimeOut)   m |= (1u << 7);   // Game Reset
+    return m;
+}
+
 AdminContext buildAdminContext() {
     AdminContext ac;
     ac.selectedPage = adminSelectedPage;
@@ -1813,7 +1829,7 @@ void loop() {
 
         case STATE_ADMIN_MENU:
             if (needsDisplayUpdate) {
-                drawAdminMenu(adminMenuIndex, adminScrollIndex, selectedMode);
+                drawAdminMenu(adminMenuIndex, adminScrollIndex, adminHiddenMask());
                 needsDisplayUpdate = false;
             }
             handleButtons();
@@ -2181,26 +2197,30 @@ void onShortPress(uint8_t btnIndex) {
 
     else if (currentState == STATE_ADMIN_MENU) {
         if (btnIndex == 2) {            // VERDE — scroll jos
-            adminMenuIndex++;
-            if (adminMenuIndex == 6 && selectedMode == -1) adminMenuIndex++;
+            uint16_t hidden = adminHiddenMask();
+            do { adminMenuIndex++; } while (adminMenuIndex < 10 && (hidden & (1u << adminMenuIndex)));
             if (adminMenuIndex >= 10) {
                 adminMenuIndex = 0;
                 adminScrollIndex = 0;
             } else {
                 uint8_t vis = 0;
-                for (uint8_t i = adminScrollIndex; i <= adminMenuIndex; i++) {
-                    if (i == 6 && selectedMode == -1) continue;
-                    vis++;
-                }
+                for (uint8_t i = adminScrollIndex; i <= adminMenuIndex; i++)
+                    if (!(hidden & (1u << i))) vis++;
                 while (vis > 5) {
                     adminScrollIndex++;
-                    if (adminScrollIndex == 6 && selectedMode == -1) adminScrollIndex++;
+                    while (adminScrollIndex < 10 && (hidden & (1u << adminScrollIndex))) adminScrollIndex++;
                     vis--;
                 }
             }
             needsDisplayUpdate = true;
 
         } else if (btnIndex == 3) {     // GALBEN — confirmare
+            // Starea se poate schimba cat stai in meniu (o alerta de resume, de exemplu),
+            // iar randul selectat sa devina intre timp ascuns. Nu il executam.
+            if (adminHiddenMask() & (1u << adminMenuIndex)) {
+                tone(PIN_BUZZER, 200, 300);
+                return;
+            }
             bool gameActive = isGameTimerRunning && !isGamePaused && !isTimeOut;
             blockReturnState = STATE_ADMIN_MENU;
             if (adminMenuIndex == 3) {

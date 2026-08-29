@@ -191,6 +191,10 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
 - **Admin** (card de admin sau combo Roșu+Albastru 3s): Game Settings, Bomb Parameters, Respawn
   Rules, Sync Units, TAG Writer, Imp./Exp. Data, Change Mode, **Game Reset**, System Restart,
   Power Off. Cele mai multe sunt **blocate cât timp jocul rulează** → `STATE_ADMIN_BLOCKED`.
+  Două rânduri se **ascund** când n-ar avea sens (`adminHiddenMask()`, o mască de biți pasată
+  la `drawAdminMenu`, folosită și de scroll și de confirmare): **Change Mode** fără rol, și
+  **Game Reset** dacă jocul nu e nici pe pauză, nici încheiat — nepornit n-ai ce reseta, iar
+  după un Game Reset jocul redevine nepornit și rândul dispare la loc.
   **Game Reset** (`PKT_GAMERESET`) repune jocul la starea de dinainte de primul START:
   sectoare neutre, bombe dezamorsate, coadă goală, puncte și kill-uri pe zero, ceasul la
   limită, `isTimeOut`/`conquestWinner` șterse. **Păstrează modurile unităților** (respawn-ul
