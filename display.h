@@ -97,7 +97,8 @@ void drawPages(const PageContext& ctx);
 // ============================================================
 // ADMIN — meniu + sub-pagini de setari
 // ============================================================
-void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode);
+// hiddenMask: bitul i setat = randul i din meniu nu se afiseaza (vezi adminHiddenMask)
+void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, uint16_t hiddenMask);
 
 // AdminContext — datele celor 4 sub-pagini (0=Game,1=Bomb,2=Respawn,3=TagWriter)
 struct AdminContext {

@@ -984,7 +984,7 @@ void drawPages(const PageContext& ctx) {
     display.display();
 }
 
-void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) {
+void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, uint16_t hiddenMask) {
     display.clearDisplay();
     display.setTextSize(1);
     display.setCursor(32, 0);
@@ -996,9 +996,7 @@ void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) 
     uint8_t shown = 0;
     for (uint8_t i = scrollIndex; i < 10; i++) {
         if (shown >= 5) break;
-
-        // Ascundem Change Mode (index 6) daca nu avem mod selectat
-        if (i == 6 && selectedMode == -1) continue;
+        if (hiddenMask & (1u << i)) continue;   // rand ascuns in starea curenta
 
         display.setCursor(0, 14 + (shown * 10));
 
@@ -1013,7 +1011,8 @@ void drawAdminMenu(uint8_t menuIndex, uint8_t scrollIndex, int8_t selectedMode) 
         shown++;
     }
 
-    uint8_t total = (selectedMode == -1) ? 9 : 10;
+    uint8_t total = 10;
+    for (uint8_t i = 0; i < 10; i++) if (hiddenMask & (1u << i)) total--;
     drawScrollbar(total, 5, scrollIndex, 13, 51);
     display.display();
 }
