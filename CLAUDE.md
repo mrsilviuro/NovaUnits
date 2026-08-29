@@ -193,8 +193,9 @@ sectoarele din tabel; ceasul nu curge), `WIN_BY_ANY` (ambele).
   Power Off. Cele mai multe sunt **blocate cât timp jocul rulează** → `STATE_ADMIN_BLOCKED`.
   Două rânduri se **ascund** când n-ar avea sens (`adminHiddenMask()`, o mască de biți pasată
   la `drawAdminMenu`, folosită și de scroll și de confirmare): **Change Mode** fără rol, și
-  **Game Reset** dacă jocul nu e nici pe pauză, nici încheiat — nepornit n-ai ce reseta, iar
-  după un Game Reset jocul redevine nepornit și rândul dispare la loc.
+  **Game Reset** cât timp jocul **nu a fost pornit** — atunci n-ai ce reseta (pagina 6 oferă
+  chiar START), iar după un Game Reset jocul redevine nepornit și rândul dispare la loc. Cât
+  timp jocul chiar rulează rândul **se vede**, dar confirmarea dă „Can't do that while playing".
   **Game Reset** (`PKT_GAMERESET`) repune jocul la starea de dinainte de primul START:
   sectoare neutre, bombe dezamorsate, coadă goală, puncte și kill-uri pe zero, ceasul la
   limită, `isTimeOut`/`conquestWinner` șterse. **Păstrează modurile unităților** (respawn-ul

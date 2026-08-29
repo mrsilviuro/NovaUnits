@@ -209,14 +209,16 @@ void updateBattery() {
 // Tiparul din proiect: ascundem ce e fara sens in starea curenta, blocam cu mesaj
 // ce e doar temporar interzis.
 //   Change Mode : fara rol nu ai ce schimba.
-//   Game Reset  : apare doar cand exista un joc de resetat — pe pauza sau dupa game
-//                 over. Nepornit nu ai ce reseta (pagina 6 ofera START), iar dupa un
-//                 Game Reset jocul e din nou nepornit, deci randul dispare la loc.
+//   Game Reset  : apare doar dupa ce s-a dat START. Nepornit nu ai ce reseta (pagina 6
+//                 ofera chiar START), iar dupa un Game Reset jocul e din nou nepornit,
+//                 deci randul dispare la loc. Cat timp jocul chiar ruleaza randul se
+//                 vede, dar confirmarea da "Can't do that while playing".
 // ============================================================
 static uint16_t adminHiddenMask() {
     uint16_t m = 0;
-    if (selectedMode == -1)            m |= (1u << 6);   // Change Mode
-    if (!isGamePaused && !isTimeOut)   m |= (1u << 7);   // Game Reset
+    if (selectedMode == -1) m |= (1u << 6);   // Change Mode: fara rol nu ai ce schimba
+    if (!isGameTimerRunning && !isGamePaused && !isTimeOut)
+                            m |= (1u << 7);   // Game Reset: jocul nu a fost pornit
     return m;
 }
 
